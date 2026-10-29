@@ -62,7 +62,11 @@ tests/
                    the adapters serving exactly the tasks, task shapes and docstrings, the
                    README status table, the template tag, the core bound
   test_api.py      optional: the endpoint wrappers' own tests
-  test_tasks.py    per-task replay tests and classify on the recorded error answers
+  test_tasks.py    per-task replay tests, and classify on the recorded error answers (the
+                   401 authError, the 403 scope refusal; the token endpoint's
+                   invalid_grant and invalid_client are test_auth.py's) and on answers
+                   built from handle-errors.md's documented samples (the per-minute
+                   and daily quota and domainPolicy, which demo cannot provoke)
   test_auth.py     RefreshTokenAuth: the refresh, the 401 retry, the refusals, no disk
   test_account_lock.py  the --account lock and the loopback rule
   test_consent.py  the consent tool, offline
