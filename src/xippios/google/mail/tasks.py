@@ -162,8 +162,9 @@ async def list_messages_async(
 
     Ids only: each item is a message's ``id`` and ``thread_id``, for
     ``google_mail_get_message`` and ``google_mail_get_thread``;
-    ``google_mail_search_messages`` shows sender, subject and date too.
-    ``next_page_token`` continues the list, and ``result_size_estimate`` is upstream's
+    ``google_mail_search_messages`` shows sender, subject and date too. It returns one
+    page; pass ``page_token`` from ``next_page_token`` for the next; the mailbox is
+    unbounded, so no call collects every page. ``result_size_estimate`` is upstream's
     estimate of the matches, not a count. One call, five quota units.
 
     Args:
@@ -175,7 +176,7 @@ async def list_messages_async(
         label_ids: Label ids every message must carry, e.g. ``["INBOX"]`` or
             ``["INBOX", "UNREAD"]``; ``google_mail_list_labels`` lists them.
         max_results: Ids per page, e.g. ``10``; upstream's default 100, at most 500.
-        page_token: The ``next_page_token`` of the previous page, to continue the list.
+        page_token: The ``next_page_token`` of the previous page, for the next page.
         include_spam_trash: ``True`` lists messages in SPAM and TRASH too.
     """
     answer = await api.messages_list(
