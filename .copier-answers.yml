@@ -1,0 +1,18 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: v0.3.0
+_src_path: https://github.com/xippios/sdk-template.git
+api_base_url: https://gmail.googleapis.com/gmail/v1/users/me
+api_key_env: ''
+core_git_ref: ''
+core_version: 0.3.0
+gateway: none
+has_files: false
+import_path: google.mail
+rate_limit_burst: 10
+rate_limit_per_minute: 60
+rate_limit_provenance: self-imposed
+source_dependencies: '[]'
+source_name: Gmail
+source_slug: google-mail
+upstream_docs_url: https://developers.google.com/workspace/gmail/api/reference/rest
+upstream_url: https://developers.google.com/workspace/gmail/api
