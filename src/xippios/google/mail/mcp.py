@@ -2,8 +2,7 @@
 
 Every task in ``tasks.__all__`` is a read-only tool, but those ``tasks.BULK_TASKS``
 names, which core skips: the server is passed ``tasks.__all__`` whole (ADR-0019). No
-logic lives here (ADR-0001). Entry point: ``xippios-google-mail-mcp-read``, the read
-server; the write server, ``mcp_write.py``, has an entry point of its own.
+logic lives here (ADR-0001). Entry point: ``xippios-google-mail-mcp-read``, the read server.
 """
 
 from xippios.core.mcp import build_server, main
