@@ -224,20 +224,41 @@ def main(argv: Sequence[str] | None = None) -> int:
     if "code" not in result:
         _say(f"no consent: the redirect carried error={result.get('error', 'none')}")
         return 1
-    response = httpx.post(
-        TOKEN_URL,
-        data={
-            "code": result["code"],
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "redirect_uri": redirect_uri,
-            "grant_type": "authorization_code",
-            "code_verifier": verifier,
-        },
-        headers={"User-Agent": config.user_agent, "Accept": "application/json"},
-        timeout=config.timeouts.to_httpx(),
-    )
+    response = _exchange(result["code"], verifier, redirect_uri, client_id, client_secret)
+    if response is None:
+        return 1
     return _report(response, args.account, args.scopes)
+
+
+def _exchange(
+    code: str, verifier: str, redirect_uri: str, client_id: str, client_secret: str
+) -> httpx.Response | None:
+    """The code exchange at the token endpoint; ``None`` after a transport failure.
+
+    A failure to reach the endpoint (no network, a timeout) prints one line on stderr,
+    naming the failure's kind, and no traceback, whose frames would hold the code and the
+    client secret.
+    """
+    try:
+        return httpx.post(
+            TOKEN_URL,
+            data={
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+                "code_verifier": verifier,
+            },
+            headers={"User-Agent": config.user_agent, "Accept": "application/json"},
+            timeout=config.timeouts.to_httpx(),
+        )
+    except httpx.RequestError as failure:
+        _say(
+            f"the code exchange (POST /token) failed: {type(failure).__name__}; no token was "
+            "received, run the tool again"
+        )
+        return None
 
 
 def _report(response: httpx.Response, account: str, scope_set: str) -> int:

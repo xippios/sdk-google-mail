@@ -228,3 +228,26 @@ def test_an_answer_without_a_refresh_token_prints_none(
     answer = {key: value for key, value in READ_ANSWER.items() if key != "refresh_token"}
     assert _consent._report(_answer(200, answer), "demo", "read") == 1
     assert capsys.readouterr().out == ""
+
+
+def test_a_transport_failure_of_the_exchange_is_one_line_and_exit_1(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    respx_mock: respx.MockRouter,
+) -> None:
+    """No traceback, whose frames would hold the code and the client secret."""
+    monkeypatch.setattr(secrets, "token_urlsafe", lambda _: STATE)
+    respx_mock.post(TOKEN_URL).mock(side_effect=httpx.ConnectError("unreachable"))
+    port = _free_port()
+    thread, codes = _consent_in_a_thread(["--account", "work", "--port", str(port)])
+    _wait_for_listener(port)
+    assert _browse(f"http://127.0.0.1:{port}/?state={STATE}&code=the-code") == 200
+    thread.join(timeout=10)
+    assert codes == [1]
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err.splitlines()[-1] == (
+        "the code exchange (POST /token) failed: ConnectError; no token was received, "
+        "run the tool again"
+    )
+    assert "Traceback" not in err
