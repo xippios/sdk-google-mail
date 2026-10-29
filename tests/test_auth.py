@@ -233,9 +233,11 @@ def test_nothing_is_written_to_disk(
 ) -> None:
     """A refresh, its reuse and a 401's renewal attempt no file write anywhere.
 
-    An audit hook watches every ``open`` for writing and every file-system change of the
-    process, in every thread, the sync facade's loop among them; a first call outside the
-    watch loads what the calls import. HOME, the cwd and the repository are listed too.
+    An audit hook watches every ``open`` of a path for writing and every file-system
+    change of the process, in every thread, the sync facade's loop among them; a
+    descriptor already open (an ``open`` of an ``int``, which a socket's file raises on
+    3.13+) is outside its reach. A first call outside the watch loads what the calls
+    import. HOME, the cwd and the repository are listed too.
     """
     home, cwd = tmp_path / "home", tmp_path / "cwd"
     home.mkdir()
@@ -263,8 +265,18 @@ def test_nothing_is_written_to_disk(
 def test_the_write_audit_sees_a_write(
     tmp_path: Path, no_writes: Callable[[], AbstractContextManager[list[tuple[str, str]]]]
 ) -> None:
-    """The watch the test above relies on reports an ``open`` for writing and a ``mkdir``."""
+    """The watch reports an ``open`` of a path for writing and a ``mkdir``, not a descriptor.
+
+    A descriptor already open, wrapped for writing (``os.fdopen``, as ``socket.makefile``
+    does from Python 3.13 on), raises an ``open`` event of an ``int`` on every version:
+    it reaches no new file and is not counted.
+    """
+    reading, writing = os.pipe()
     with no_writes() as writes:
         (tmp_path / "made").mkdir()
         (tmp_path / "made" / "file").write_text("x")
+        with os.fdopen(writing, "wb") as pipe:
+            pipe.write(b"x")
+    os.close(reading)
     assert [event for event, _ in writes] == ["os.mkdir", "open"]
+    assert all(path.startswith(str(tmp_path)) for _, path in writes)

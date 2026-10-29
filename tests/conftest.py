@@ -88,8 +88,13 @@ class _WriteAudit:
     """Every file write the process attempts, in any thread, while ``watching``.
 
     One audit hook for the session (``sys.addaudithook`` cannot be removed), off unless
-    a test watches: ``open`` with a writing mode or flags, and the file-system events of
-    ``_WRITE_EVENTS``. Python's own bytecode cache (``__pycache__``) is not counted.
+    a test watches: ``open`` of a path with a writing mode or flags, and the file-system
+    events of ``_WRITE_EVENTS``. Not counted: Python's own bytecode cache
+    (``__pycache__``), and an ``open`` whose path is an ``int``, a descriptor already open,
+    which reaches no new file: from Python 3.13 on, ``socket.makefile`` wraps an accepted
+    connection's descriptor through ``io.open`` and raises that event, as the consent
+    tool's loopback listener does for the redirect. Writes through a descriptor opened
+    before the watch are outside its reach.
     """
 
     def __init__(self) -> None:
@@ -101,6 +106,8 @@ class _WriteAudit:
             return
         if event == "open":
             path, mode, flags = (*args, None, None, None)[:3]
+            if isinstance(path, int):
+                return  # a descriptor already open: socket.makefile on 3.13+, no new file
             writing = (isinstance(mode, str) and any(c in mode for c in "wax+")) or (
                 isinstance(flags, int) and bool(flags & _WRITE_FLAGS)
             )
