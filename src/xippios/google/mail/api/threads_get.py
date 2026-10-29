@@ -40,7 +40,7 @@ async def threads_get(
 
     Args:
         client: The account's client, ``_client.client_for(account)``.
-        id: ``id``, the thread's id, e.g. ``"1a18715327e2e304"``, a message's
+        id: ``id``, the thread's id, e.g. ``"19a0b0c0d0e0f001"``, a message's
             ``threadId``; sent as one path segment.
         format: ``format``: ``"full"``, ``"metadata"`` or ``"minimal"``.
         metadata_headers: ``metadataHeaders``, one query parameter per header name, e.g.

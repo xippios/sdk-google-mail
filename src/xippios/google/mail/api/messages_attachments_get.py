@@ -35,7 +35,7 @@ async def messages_attachments_get(
     Args:
         client: The account's client, ``_client.client_for(account)``.
         message_id: ``messageId``, the id of the message holding the attachment, e.g.
-            ``"1a18715327e2e304"``; one path segment.
+            ``"19a0b0c0d0e0f001"``; one path segment.
         id: ``id``, the attachment's id, a part's ``body.attachmentId``; one path
             segment.
     """

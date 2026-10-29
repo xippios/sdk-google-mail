@@ -266,7 +266,7 @@ async def get_message_async(
     Args:
         account: A declared account's name, e.g. ``demo`` or ``work``;
             ``google_mail_list_accounts`` lists them.
-        message_id: The message's ``id``, e.g. ``"1a18715327e2e304"``, from
+        message_id: The message's ``id``, e.g. ``"19a0b0c0d0e0f001"``, from
             ``google_mail_list_messages`` or ``google_mail_search_messages``.
         include_html: ``True`` returns the HTML version in ``html`` as well, for a
             message whose plain text is missing or poor; it makes the answer longer.
@@ -296,7 +296,7 @@ async def get_thread_async(
         account: A declared account's name, e.g. ``demo`` or ``work``;
             ``google_mail_list_accounts`` lists them.
         thread_id: The thread's id, a message's ``thread_id``, e.g.
-            ``"1a18715327e2e304"``.
+            ``"19a0b0c0d0e0f001"``.
         start: The first message to show, counted from 0 in the thread's order; e.g.
             ``0`` or ``5``.
         limit: How many messages to show from ``start``, e.g. ``5``; omitted, every

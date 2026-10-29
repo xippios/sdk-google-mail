@@ -43,7 +43,7 @@ async def messages_get(
 
     Args:
         client: The account's client, ``_client.client_for(account)``.
-        id: ``id``, the message's id, e.g. ``"1a18715327e2e304"``, from
+        id: ``id``, the message's id, e.g. ``"19a0b0c0d0e0f001"``, from
             ``messages.list``; sent as one path segment.
         format: ``format``: ``"minimal"``, ``"metadata"`` or ``"full"``.
         metadata_headers: ``metadataHeaders``, one query parameter per header name, e.g.
