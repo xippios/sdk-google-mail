@@ -1,0 +1,57 @@
+{
+  "recorded_at": "2026-10-29T13:53:50.707163Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages?q=newer_than%3A1y"
+  },
+  "response": {
+    "body": "{\n  \"messages\": [\n    {\n      \"id\": \"1a18715327e2e304\",\n      \"threadId\": \"1a18715327e2e304\"\n    },\n    {\n      \"id\": \"1a187146c1f83c87\",\n      \"threadId\": \"1a187146c1f83c87\"\n    },\n    {\n      \"id\": \"1a18713c38da22a3\",\n      \"threadId\": \"1a18713c38da22a3\"\n    }\n  ],\n  \"resultSizeEstimate\": 3\n}\n",
+    "body_base64": false,
+    "headers": [
+      [
+        "content-type",
+        "application/json; charset=UTF-8"
+      ],
+      [
+        "vary",
+        "Origin"
+      ],
+      [
+        "vary",
+        "X-Origin"
+      ],
+      [
+        "vary",
+        "Referer"
+      ],
+      [
+        "date",
+        "Thu, 29 Oct 2026 13:53:48 GMT"
+      ],
+      [
+        "server",
+        "ESF"
+      ],
+      [
+        "x-xss-protection",
+        "0"
+      ],
+      [
+        "x-frame-options",
+        "SAMEORIGIN"
+      ],
+      [
+        "x-content-type-options",
+        "nosniff"
+      ],
+      [
+        "alt-svc",
+        "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+      ]
+    ],
+    "status": 200
+  }
+}

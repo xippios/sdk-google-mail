@@ -1,0 +1,57 @@
+{
+  "recorded_at": "2026-10-29T13:54:02.722692Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages/1a18715327e2e304?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date"
+  },
+  "response": {
+    "body": "{\n  \"id\": \"1a18715327e2e304\",\n  \"threadId\": \"1a18715327e2e304\",\n  \"labelIds\": [\n    \"UNREAD\",\n    \"INBOX\"\n  ],\n  \"snippet\": \"user@example.com kann Ihnen jetzt bei der Anmeldung helfen user@example.com Wenn Sie Probleme bei der Anmeldung haben, k\u00f6nnen Sie jetzt user@example.com um Hilfe bitten. Wie Sie\",\n  \"payload\": {\n    \"mimeType\": \"multipart/alternative\",\n    \"headers\": [\n      {\n        \"name\": \"Date\",\n        \"value\": \"Thu, 29 Oct 2026 09:54:34 GMT\"\n      },\n      {\n        \"name\": \"Subject\",\n        \"value\": \"user@example.com kann Ihnen jetzt bei der Anmeldung helfen\"\n      },\n      {\n        \"name\": \"From\",\n        \"value\": \"Google <user@example.com>\"\n      }\n    ]\n  },\n  \"sizeEstimate\": 15321,\n  \"historyId\": \"1346\",\n  \"internalDate\": \"1793267674000\"\n}\n",
+    "body_base64": false,
+    "headers": [
+      [
+        "content-type",
+        "application/json; charset=UTF-8"
+      ],
+      [
+        "vary",
+        "Origin"
+      ],
+      [
+        "vary",
+        "X-Origin"
+      ],
+      [
+        "vary",
+        "Referer"
+      ],
+      [
+        "date",
+        "Thu, 29 Oct 2026 13:54:01 GMT"
+      ],
+      [
+        "server",
+        "ESF"
+      ],
+      [
+        "x-xss-protection",
+        "0"
+      ],
+      [
+        "x-frame-options",
+        "SAMEORIGIN"
+      ],
+      [
+        "x-content-type-options",
+        "nosniff"
+      ],
+      [
+        "alt-svc",
+        "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+      ]
+    ],
+    "status": 200
+  }
+}

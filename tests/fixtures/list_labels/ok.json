@@ -1,0 +1,57 @@
+{
+  "recorded_at": "2026-10-29T13:53:27.856070Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://gmail.googleapis.com/gmail/v1/users/me/labels"
+  },
+  "response": {
+    "body": "{\n  \"labels\": [\n    {\n      \"id\": \"CHAT\",\n      \"name\": \"CHAT\",\n      \"messageListVisibility\": \"hide\",\n      \"labelListVisibility\": \"labelHide\",\n      \"type\": \"system\"\n    },\n    {\n      \"id\": \"SENT\",\n      \"name\": \"SENT\",\n      \"type\": \"system\"\n    },\n    {\n      \"id\": \"INBOX\",\n      \"name\": \"INBOX\",\n      \"type\": \"system\"\n    },\n    {\n      \"id\": \"IMPORTANT\",\n      \"name\": \"IMPORTANT\",\n      \"messageListVisibility\": \"hide\",\n      \"labelListVisibility\": \"labelHide\",\n      \"type\": \"system\"\n    },\n    {\n      \"id\": \"TRASH\",\n      \"name\": \"TRASH\",\n      \"messageListVisibility\": \"hide\",\n      \"labelListVisibility\": \"labelHide\",\n      \"type\": \"system\"\n    },\n    {\n      \"id\": \"DRAFT\",\n      \"name\": \"DRAFT\",\n      \"type\": \"system\"\n    },\n    {\n      \"id\": \"SPAM\",\n      \"name\": \"SPAM\",\n      \"messageListVisibility\": \"hide\",\n      \"labelListVisibility\": \"labelHide\",\n      \"type\": \"system\"\n    },\n    {\n      \"id\": \"CATEGORY_FORUMS\",\n      \"name\": \"CATEGORY_FORUMS\",\n      \"messageListVisibility\": \"hide\",\n      \"labelListVisibility\": \"labelHide\",\n      \"type\": \"system\"\n    },\n    {\n      \"id\": \"CATEGORY_UPDATES\",\n      \"name\": \"CATEGORY_UPDATES\",\n      \"messageListVisibility\": \"hide\",\n      \"labelListVisibility\": \"labelHide\",\n      \"type\": \"system\"\n    },\n    {\n      \"id\": \"CATEGORY_PERSONAL\",\n      \"name\": \"CATEGORY_PERSONAL\",\n      \"messageListVisibility\": \"hide\",\n      \"labelListVisibility\": \"labelHide\",\n      \"type\": \"system\"\n    },\n    {\n      \"id\": \"CATEGORY_PROMOTIONS\",\n      \"name\": \"CATEGORY_PROMOTIONS\",\n      \"messageListVisibility\": \"hide\",\n      \"labelListVisibility\": \"labelHide\",\n      \"type\": \"system\"\n    },\n    {\n      \"id\": \"CATEGORY_SOCIAL\",\n      \"name\": \"CATEGORY_SOCIAL\",\n      \"messageListVisibility\": \"hide\",\n      \"labelListVisibility\": \"labelHide\",\n      \"type\": \"system\"\n    },\n    {\n      \"id\": \"STARRED\",\n      \"name\": \"STARRED\",\n      \"type\": \"system\"\n    },\n    {\n      \"id\": \"UNREAD\",\n      \"name\": \"UNREAD\",\n      \"type\": \"system\"\n    }\n  ]\n}\n",
+    "body_base64": false,
+    "headers": [
+      [
+        "content-type",
+        "application/json; charset=UTF-8"
+      ],
+      [
+        "vary",
+        "Origin"
+      ],
+      [
+        "vary",
+        "X-Origin"
+      ],
+      [
+        "vary",
+        "Referer"
+      ],
+      [
+        "date",
+        "Thu, 29 Oct 2026 13:53:27 GMT"
+      ],
+      [
+        "server",
+        "ESF"
+      ],
+      [
+        "x-xss-protection",
+        "0"
+      ],
+      [
+        "x-frame-options",
+        "SAMEORIGIN"
+      ],
+      [
+        "x-content-type-options",
+        "nosniff"
+      ],
+      [
+        "alt-svc",
+        "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+      ]
+    ],
+    "status": 200
+  }
+}
