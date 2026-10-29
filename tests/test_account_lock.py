@@ -4,8 +4,9 @@ From sdk-cashctrl's ``tests/test_org_lock.py`` at ``6db155b`` (queue row 281), w
 ``account`` for ``org``: no middleware, but a wrapper that binds ``account`` on every tool
 when the server is built, so no tool takes it. Every tool call goes through
 ``xippios.core.testing.mcp_call_text``, an in-process ``mcp.Client``, so core's argument
-check runs as it does for a real client. sdk-cashctrl's write-server tests stay there:
-this package has no write server yet. Added: the read server's loopback rule
+check runs as it does for a real client. Its write-server tests as well: both entry
+points fail fast on an undeclared account and bind to a declared one, and the write
+server is held to loopback by core's rule. Added: the read server's loopback rule
 (ADR-0025, D-a) and the unset refresh token at startup.
 """
 
@@ -24,7 +25,7 @@ from mcp.server.mcpserver import MCPServer
 from xippios.core.mcp import build_server
 from xippios.core.testing import ReplayFixture, mcp_call, mcp_call_text
 
-from xippios.google.mail import mcp, tasks
+from xippios.google.mail import mcp, mcp_write, tasks, tasks_write
 from xippios.google.mail._account_lock import (
     AccountLock,
     bind,
@@ -109,10 +110,10 @@ def test_a_lock_needs_a_parameter_name_and_a_tenant(param: str, value: str) -> N
         AccountLock(param, value)
 
 
-@pytest.mark.parametrize("name", tasks.__all__)
+@pytest.mark.parametrize("name", [*tasks.__all__, *tasks_write.__all__])
 def test_a_bound_task_keeps_its_name_and_drops_account(name: str) -> None:
     """Same ``__name__`` (tool names, ``MCP_CAPS`` keys), no ``account`` anywhere."""
-    task = getattr(tasks, name)
+    task = getattr(tasks, name, None) or getattr(tasks_write, name)
     bound = bind(task, LOCK)
     assert bound.__name__ == task.__name__
     parameters = inspect.signature(bound).parameters
@@ -308,34 +309,38 @@ def test_unknown_options_still_fail() -> None:
     assert info.value.code == 2
 
 
-def test_the_entry_point_fails_fast_on_an_undeclared_account(
+@pytest.mark.parametrize("module", [mcp, mcp_write], ids=["mcp", "mcp_write"])
+def test_both_entry_points_fail_fast_on_an_undeclared_account(
+    module: Any,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     runs: list[tuple[MCPServer, str, dict[str, Any]]],
 ) -> None:
-    monkeypatch.setattr("sys.argv", ["xippios-google-mail-mcp-read", "--account", "nope"])
+    monkeypatch.setattr("sys.argv", ["entry-point", "--account", "nope"])
     with pytest.raises(SystemExit) as info:
-        mcp.run()
+        module.run()
     assert info.value.code == 2
     assert "unknown tenant 'nope'" in capsys.readouterr().err
     assert runs == []
 
 
-async def test_the_entry_point_binds_to_the_account(
+@pytest.mark.parametrize("module", [mcp, mcp_write], ids=["mcp", "mcp_write"])
+async def test_both_entry_points_bind_to_the_account(
+    module: Any,
     monkeypatch: pytest.MonkeyPatch,
     runs: list[tuple[MCPServer, str, dict[str, Any]]],
 ) -> None:
-    monkeypatch.setattr("sys.argv", ["xippios-google-mail-mcp-read", "--account", DEMO])
-    mcp.run()
+    monkeypatch.setattr("sys.argv", ["entry-point", "--account", DEMO])
+    module.run()
     ((server, transport, _),) = runs
     assert transport == "stdio"
-    assert server is not mcp.server
-    assert server.name == mcp.server.name
-    assert server.instructions == f"{mcp.BOUND_INSTRUCTIONS} {SENTENCE}"
+    assert server is not module.server
+    assert server.name == module.server.name == f"xippios-{SOURCE}", "core's default name"
+    assert server.instructions == f"{module.BOUND_INSTRUCTIONS} {SENTENCE}"
     assert "takes account" not in (server.instructions or ""), "no word of an account argument"
-    assert "takes account" in (mcp.server.instructions or ""), "the unbound text keeps it"
+    assert "takes account" in (module.server.instructions or ""), "the unbound text keeps it"
     bound = {tool.name: tool for tool in await server.list_tools()}
-    unbound = {tool.name: tool for tool in await mcp.server.list_tools()}
+    unbound = {tool.name: tool for tool in await module.server.list_tools()}
     assert bound.keys() == unbound.keys(), "the same tools, by name"
     for name, tool in bound.items():
         expected = set(unbound[name].input_schema.get("properties", {})) - {"account"}
@@ -437,6 +442,48 @@ def test_the_loopback_rule_comes_before_the_account(
     assert REMOTE_REFUSAL in capsys.readouterr().err
     assert echo.locks == [None]
     assert runs == []
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["--http", "--host", "0.0.0.0"], ["--account", DEMO, "--http", "--host", "0.0.0.0"]],
+    ids=["unlocked", "locked"],
+)
+def test_the_write_server_stays_on_loopback_by_core_s_rule(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    runs: list[tuple[MCPServer, str, dict[str, Any]]],
+    argv: list[str],
+) -> None:
+    """Core's ``main`` refuses it with its own message; the read server's rule steps aside."""
+    monkeypatch.setattr("sys.argv", ["xippios-google-mail-mcp-write", *argv])
+    with pytest.raises(SystemExit) as info:
+        mcp_write.run()
+    assert info.value.code == 2
+    err = capsys.readouterr().err
+    assert "xippios-google-mail is a write server and carries no authentication" in err
+    assert REMOTE_REFUSAL not in err
+    assert runs == []
+    monkeypatch.setattr("sys.argv", ["xippios-google-mail-mcp-write", *argv, "--allow-remote"])
+    mcp_write.run()
+    monkeypatch.setattr("sys.argv", ["xippios-google-mail-mcp-write", "--http", "--host", "::1"])
+    mcp_write.run()
+    assert [(transport, options["host"]) for _, transport, options in runs] == [
+        ("streamable-http", "0.0.0.0"),
+        ("streamable-http", "::1"),
+    ]
+
+
+def test_the_write_server_s_help_lists_account_and_allow_remote(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr("sys.argv", ["xippios-google-mail-mcp-write", "--help"])
+    with pytest.raises(SystemExit) as info:
+        mcp_write.run()
+    assert info.value.code == 0
+    out = capsys.readouterr().out
+    assert "--account" in out
+    assert "--allow-remote" in out
 
 
 @pytest.mark.parametrize("argv", [[], ["--account", DEMO]], ids=["unlocked", "locked"])
