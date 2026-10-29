@@ -1,0 +1,57 @@
+{
+  "recorded_at": "2026-10-29T15:33:18.259740Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages/1a1884b13e6018c2?format=metadata&metadataHeaders=Message-ID&metadataHeaders=References&metadataHeaders=Subject"
+  },
+  "response": {
+    "body": "{\n  \"id\": \"1a1884b13e6018c2\",\n  \"threadId\": \"1a1884b13e6018c2\",\n  \"labelIds\": [\n    \"UNREAD\",\n    \"SENT\",\n    \"INBOX\"\n  ],\n  \"snippet\": \"Written by the xippios-google-mail fixture recorder, to this mailbox itself.\",\n  \"payload\": {\n    \"mimeType\": \"text/plain\",\n    \"headers\": [\n      {\n        \"name\": \"Subject\",\n        \"value\": \"xippios-live send\"\n      },\n      {\n        \"name\": \"Message-Id\",\n        \"value\": \"<1@example.com>\"\n      }\n    ]\n  },\n  \"sizeEstimate\": 639,\n  \"historyId\": \"1440\",\n  \"internalDate\": \"1793287983000\"\n}\n",
+    "body_base64": false,
+    "headers": [
+      [
+        "content-type",
+        "application/json; charset=UTF-8"
+      ],
+      [
+        "vary",
+        "Origin"
+      ],
+      [
+        "vary",
+        "X-Origin"
+      ],
+      [
+        "vary",
+        "Referer"
+      ],
+      [
+        "date",
+        "Thu, 29 Oct 2026 15:33:16 GMT"
+      ],
+      [
+        "server",
+        "ESF"
+      ],
+      [
+        "x-xss-protection",
+        "0"
+      ],
+      [
+        "x-frame-options",
+        "SAMEORIGIN"
+      ],
+      [
+        "x-content-type-options",
+        "nosniff"
+      ],
+      [
+        "alt-svc",
+        "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+      ]
+    ],
+    "status": 200
+  }
+}

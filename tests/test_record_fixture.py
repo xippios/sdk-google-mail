@@ -19,7 +19,14 @@ import httpx
 import pytest
 import respx
 from xippios.core import InvalidRequestError
-from xippios.core.testing import REDACTED, Fixture, ReplayFixture, Scrub, fixture_from_response
+from xippios.core.testing import (
+    REDACTED,
+    Fixture,
+    ReplayFixture,
+    Scrub,
+    fixture_from_response,
+    sent_urls,
+)
 
 from xippios.google.mail._client import DEMO, TENANTS
 
@@ -610,3 +617,173 @@ def test_display_names_go_on_every_part_s_address_headers_alone(recorder: Module
         {"name": "From", "value": "User <user@example.com>"},
         {"name": "Cc", "value": "User <user@example.com>, user@example.com"},
     ]
+
+
+# The write tasks under the write safety rule ------------------------------------------
+
+GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
+
+
+def send_exchange(raw: str) -> httpx.Response:
+    """A made-up ``messages.send``: the request with its raw, the answer's ids and labels."""
+    request = httpx.Request("POST", f"{GMAIL}/messages/send", json={"raw": raw, "threadId": "t1"})
+    body = {"id": "19a0000000000009", "threadId": "t1", "labelIds": ["SENT"]}
+    return httpx.Response(200, json=body, request=request)
+
+
+def test_a_write_s_raw_is_dropped_from_the_request_body(recorder: ModuleType) -> None:
+    raw = b64url("To: demo.inbox@example.net\r\nSubject: xippios-live\r\n\r\nhello\r\n")
+    fixture = scrubbed(recorder, send_exchange(raw))
+    assert json.loads(fixture.request.body or "") == {"threadId": "t1"}, "raw goes, ids stay"
+    assert json.loads(fixture.response.body)["labelIds"] == ["SENT"]
+    assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == []
+
+
+def test_a_raw_left_in_the_request_body_is_refused(recorder: ModuleType) -> None:
+    raw = fixture_from_response(send_exchange(b64url("Subject: xippios-live\r\n\r\nhello")))
+    leaks = recorder.check(recorder.to_json(raw), raw, SECRETS)
+    assert leaks == ["a raw field, a whole message, in the request body"]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["send_message", "ok", "subject=xippios-live send", "body=b", "to=other@example.org"],
+        ["create_draft", "ok", "subject=xippios-live draft", "body=b", "cc=other@example.org"],
+        ["send_message", "ok", "subject=xippios-live send", "body=b", "bcc=other@example.org"],
+        ["create_draft", "ok", "subject=no marker", "body=b", "confirm=true"],
+        ["send_message", "ok", "body=b"],
+        ["trash_message", "ok", "confirm=true"],
+        ["modify_message", "ok", "message_id=m", "add_label_ids=STARRED", "confirm=yes"],
+        ["delete_draft", "ok", "draft_id=r-1", "account=work"],
+        ["send_message", "ok", "subject=xippios-live", "body=b", "--garbage-bearer"],
+    ],
+)
+def test_a_write_recording_refuses_before_any_request(
+    recorder: ModuleType, respx_mock: respx.MockRouter, argv: list[str]
+) -> None:
+    """No recipient is ever named on the command line, and every subject carries the marker."""
+    with pytest.raises(SystemExit) as info:
+        recorder.main(argv)
+    assert info.value.code == 2
+    assert not respx_mock.calls
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        ({"to": ["other@example.org"]}, r"^to holds an address other than demo's own"),
+        ({"to": ["user@example.com"], "cc": ["x@example.org"]}, r"^cc holds an address other"),
+        ({"to": ["user@example.com", "x@example.org"]}, r"^to holds an address other"),
+        ({"to": ["user@example.com"], "bcc": ["a@example.org, user@example.com"]}, r"^bcc "),
+        ({"to": []}, r"^to names no address"),
+    ],
+)
+def test_self_only_refuses_any_address_but_demo_s_own(
+    recorder: ModuleType, arguments: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message) as info:
+        recorder.self_only(arguments, "user@example.com")
+    assert "example.org" not in str(info.value), "the refusal names no address"
+    recorder.self_only({"to": ["Demo <USER@example.com>"]}, "user@example.com")
+
+
+def test_a_composing_recording_sends_to_demo_alone_and_keeps_no_raw(
+    recorder: ModuleType,
+    replay_fixture: ReplayFixture,
+    respx_mock: respx.MockRouter,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Demo's address comes from the profile at runtime; the made-up send answer is not kept."""
+    monkeypatch.setattr(recorder, "ROOT", tmp_path)
+    monkeypatch.setattr(recorder, "FIXTURES", tmp_path / "fixtures")
+    replay_fixture("oauth2_token", "ok")
+    profile = replay_fixture("get_profile", "ok")
+    own = json.loads(
+        (ROOT / "tests" / "fixtures" / "get_profile" / "ok.json").read_text()
+    )  # the scrubbed profile: user@example.com
+    sent = respx_mock.post(f"{GMAIL}/messages/send").respond(
+        200, json={"id": "19a0000000000009", "threadId": "19a0000000000009", "labelIds": ["SENT"]}
+    )
+    argv = ["send_message", "ok", "subject=xippios-live send", "body=hello", "confirm=true"]
+    assert recorder.main(argv) == 0
+    assert profile.call_count == 1, "the profile is read, outside the recording"
+    raw = json.loads(sent.calls.last.request.content)["raw"]
+    message = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)).decode()
+    address = json.loads(own["response"]["body"])["emailAddress"]
+    assert f"To: {address}\r\n" in message
+    assert "Subject: xippios-live send\r\n" in message
+    written = sorted(p.name for p in (tmp_path / "fixtures" / "send_message").iterdir())
+    assert written == ["ok.json"], "the profile read is not recorded"
+    kept = json.loads((tmp_path / "fixtures" / "send_message" / "ok.json").read_text())
+    assert json.loads(kept["request"]["body"]) == {}, "no raw, no threadId for a new message"
+
+
+@pytest.mark.parametrize(("subject", "status"), [("Lunch", 1), ("xippios-live send", 0)])
+def test_only_a_marked_message_is_trashed(
+    recorder: ModuleType,
+    replay_fixture: ReplayFixture,
+    respx_mock: respx.MockRouter,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    subject: str,
+    status: int,
+) -> None:
+    monkeypatch.setattr(recorder, "ROOT", tmp_path)
+    monkeypatch.setattr(recorder, "FIXTURES", tmp_path / "fixtures")
+    replay_fixture("oauth2_token", "ok")
+    metadata = {"id": "m1", "payload": {"headers": [{"name": "Subject", "value": subject}]}}
+    read = respx_mock.get(f"{GMAIL}/messages/m1").respond(200, json=metadata)
+    trash = respx_mock.post(f"{GMAIL}/messages/m1/trash").respond(
+        200, json={"id": "m1", "threadId": "m1", "labelIds": ["TRASH"]}
+    )
+    assert recorder.main(["trash_message", "ok", "message_id=m1", "confirm=true"]) == status
+    assert read.call_count == 1
+    assert httpx.URL(sent_urls(read)[0]).params.get_list("metadataHeaders") == ["Subject"]
+    assert trash.call_count == (1 if status == 0 else 0)
+    assert (tmp_path / "fixtures" / "trash_message").exists() == (status == 0)
+
+
+@pytest.mark.parametrize(("subject", "status"), [("Lunch", 1), ("xippios-live send", 0)])
+def test_only_a_marked_message_is_modified(
+    recorder: ModuleType,
+    replay_fixture: ReplayFixture,
+    respx_mock: respx.MockRouter,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    subject: str,
+    status: int,
+) -> None:
+    monkeypatch.setattr(recorder, "ROOT", tmp_path)
+    monkeypatch.setattr(recorder, "FIXTURES", tmp_path / "fixtures")
+    replay_fixture("oauth2_token", "ok")
+    metadata = {"id": "m1", "payload": {"headers": [{"name": "Subject", "value": subject}]}}
+    read = respx_mock.get(f"{GMAIL}/messages/m1").respond(200, json=metadata)
+    modify = respx_mock.post(f"{GMAIL}/messages/m1/modify").respond(
+        200, json={"id": "m1", "threadId": "m1", "labelIds": ["STARRED"]}
+    )
+    argv = ["modify_message", "ok", "message_id=m1", "add_label_ids=STARRED", "confirm=true"]
+    assert recorder.main(argv) == status
+    assert read.call_count == 1
+    assert httpx.URL(sent_urls(read)[0]).params.get_list("metadataHeaders") == ["Subject"]
+    assert modify.call_count == (1 if status == 0 else 0)
+    assert (tmp_path / "fixtures" / "modify_message").exists() == (status == 0)
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "units"),
+    [
+        ("POST", "drafts", 10),
+        ("DELETE", "drafts/r-1", 10),
+        ("POST", "messages/send", 100),
+        ("POST", "messages/m1/modify", 5),
+        ("POST", "messages/m1/trash", 20),
+        ("GET", "drafts", None),
+        ("DELETE", "messages/m1", None),
+    ],
+)
+def test_the_units_of_a_write_follow_the_quota_page(
+    recorder: ModuleType, method: str, path: str, units: int | None
+) -> None:
+    assert recorder.units_of(f"{GMAIL}/{path}", method) == units

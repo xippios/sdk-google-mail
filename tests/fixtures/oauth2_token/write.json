@@ -1,0 +1,69 @@
+{
+  "recorded_at": "2026-10-29T15:31:58.757670Z",
+  "request": {
+    "body": "client_id=REDACTED&client_secret=REDACTED&grant_type=refresh_token&refresh_token=REDACTED",
+    "body_base64": false,
+    "content_type": "application/x-www-form-urlencoded",
+    "method": "POST",
+    "url": "https://oauth2.googleapis.com/token"
+  },
+  "response": {
+    "body": "{\n  \"access_token\": \"REDACTED\",\n  \"expires_in\": 3599,\n  \"scope\": \"https://www.googleapis.com/auth/gmail.modify\",\n  \"token_type\": \"Bearer\",\n  \"refresh_token_expires_in\": 604649\n}",
+    "body_base64": false,
+    "headers": [
+      [
+        "date",
+        "Thu, 29 Oct 2026 15:31:56 GMT"
+      ],
+      [
+        "pragma",
+        "no-cache"
+      ],
+      [
+        "expires",
+        "Mon, 01 Jan 1990 00:00:00 GMT"
+      ],
+      [
+        "cache-control",
+        "no-cache, no-store, max-age=0, must-revalidate"
+      ],
+      [
+        "content-type",
+        "application/json; charset=utf-8"
+      ],
+      [
+        "vary",
+        "Origin"
+      ],
+      [
+        "vary",
+        "X-Origin"
+      ],
+      [
+        "vary",
+        "Referer"
+      ],
+      [
+        "server",
+        "scaffolding on HTTPServer2"
+      ],
+      [
+        "x-xss-protection",
+        "0"
+      ],
+      [
+        "x-frame-options",
+        "SAMEORIGIN"
+      ],
+      [
+        "x-content-type-options",
+        "nosniff"
+      ],
+      [
+        "alt-svc",
+        "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+      ]
+    ],
+    "status": 200
+  }
+}

@@ -72,3 +72,23 @@ All notable changes to this project are documented here. The format follows
   headers replaced by `User`, every body decoded, its addresses replaced and encoded
   again, attachment ids numbered, a profile-picture URL redacted and the raw message
   never kept; its final check reads the decoded bodies too.
+- The write tools, on a server of their own, `xippios-google-mail-mcp-write`, which
+  takes `--account` too and is served over `--http` on a loopback `--host` only unless
+  `--allow-remote` is passed: `create_draft` and `send_message` build a plain-text
+  message in UTF-8 (To, Cc, Bcc and Subject; From is Gmail's) and store it as a draft
+  (`users.drafts.create`) or send it (`users.messages.send`), a reply joining the
+  original's conversation with its thread, In-Reply-To and References; `delete_draft`
+  deletes a draft permanently (`users.drafts.delete`); `modify_message` adds and removes
+  a message's labels (`users.messages.modify`); `trash_message` moves a message to the
+  trash (`users.messages.trash`). Every one previews and changes nothing unless called
+  with `confirm=True`: a message's headers and first lines, or the draft or message and
+  the labels; confirmed, it returns Gmail's answer, and `delete_draft`, which Gmail
+  answers without a body, an acknowledgement of its own, `{"performed": true, "id"}`.
+  They need an account consented with
+  `--scopes write`, are re-exported from `xippios.google.mail` and are no HTTP routes;
+  a result's request echo never carries the message's text.
+- The fixture recorder records the write tools under a safety rule: the demo account
+  writes to its own address only, read from its profile when it records, every message
+  it writes carries `xippios-live` in its subject, and the raw message a write sends is
+  dropped from the recorded request; the live tests follow the same rule and clean up
+  what they write.

@@ -13,27 +13,37 @@ a ``StrEnum`` written here (``LabelType``), since no packaged list renders it in
 ``enums.py``. A field the schema has and an answer may leave out is ``None`` by default,
 a list ``[]``.
 
-Two kinds of model live here. The read models of the endpoint wrappers are faithful
+Three kinds of model live here. The models of the endpoint wrappers are faithful
 (ADR-0003): ``Label``, ``ListLabelsResponse``, ``MessageRef``, ``ListMessagesResponse``,
 ``MessagePartHeader``, ``MessagePartBody``, ``MessagePart``, ``Message`` and ``Thread``,
-the MIME tree of a message whole under ``Message.payload``. The models the tasks return
-beside them are projections: ``DecodedMessage`` with its ``Attachment`` items, the
-decoded view of ADR-0025 that ``_decode.decode_message`` builds from a ``Message`` by the
-parts' MIME roles (conventions §3), and ``SearchRow``, a message's three metadata headers
-beside its ids and snippet.
+the MIME tree of a message whole under ``Message.payload``; ``Draft``, the answer of
+``drafts.create``; and ``ModifyMessageRequest``, the body ``messages.modify`` takes. The
+models the read tasks return beside them are projections: ``DecodedMessage`` with its
+``Attachment`` items, the decoded view of ADR-0025 that ``_decode.decode_message`` builds
+from a ``Message`` by the parts' MIME roles (conventions §3), and ``SearchRow``, a
+message's three metadata headers beside its ids and snippet. The write tasks
+(``tasks_write``) return upstream's answer when confirmed and, without ``confirm``, a
+preview of the package's own: ``ComposePreview`` for a message to send or store as a
+draft, ``ActionPreview`` for a draft to delete or a message to change or trash; a
+draft's deletion, which upstream answers without a body, is acknowledged by
+``DraftDeleted``.
 """
 
 import re
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BeforeValidator, Field
 from xippios.core import UpstreamModel
 
 __all__ = [
+    "ActionPreview",
     "Attachment",
+    "ComposePreview",
     "DecodedMessage",
+    "Draft",
+    "DraftDeleted",
     "EpochMillis",
     "Label",
     "LabelColor",
@@ -47,6 +57,7 @@ __all__ = [
     "MessagePartBody",
     "MessagePartHeader",
     "MessageRef",
+    "ModifyMessageRequest",
     "Profile",
     "SearchRow",
     "Thread",
@@ -296,9 +307,12 @@ class Message(UpstreamModel):
 
     What upstream fills depends on ``format``: ``minimal`` the ids and labels,
     ``metadata`` the headers too, ``full`` the whole MIME tree with each part's body in
-    ``payload``. ``raw``, the base64url text of the whole message, is not modelled: no
-    wrapper of this package asks for ``format=raw``. ``classificationLabelValues``, used
-    for Google Workspace accounts only, is not modelled either.
+    ``payload``. ``messages.send``, ``messages.modify`` and ``messages.trash`` answer with
+    a ``Message`` too, and so does a ``Draft``'s ``message``: the ids and the labels.
+    ``raw``, the base64url text of the whole message, is not modelled: no wrapper of this
+    package asks for ``format=raw``, and the two that send one (``messages_send``,
+    ``drafts_create``) take it as a parameter. ``classificationLabelValues``, used for
+    Google Workspace accounts only, is not modelled either.
 
     Attributes:
         id: "The immutable ID of the message."
@@ -341,6 +355,110 @@ class Thread(UpstreamModel):
     history_id: str | None = Field(default=None, validation_alias="historyId")
     snippet: str | None = None
     messages: list[Message] = Field(default_factory=list)
+
+
+class Draft(UpstreamModel):
+    """``schemas.Draft``: "A draft email in the user's mailbox.", ``drafts.create``'s answer.
+
+    ``drafts.create`` takes a ``Draft`` whose ``message`` carries the RFC 2822 text in
+    ``raw`` and answers with the draft stored: its ``id`` and its ``message``, of which
+    the answer sends the ids and labels (``id``, ``threadId``, ``labelIds`` with
+    ``DRAFT``); ``messages.get`` reads the rest by the message's ``id``.
+
+    Attributes:
+        id: "The immutable ID of the draft.", what ``drafts.delete`` takes; not the id of
+            its message.
+        message: "The message content of the draft."
+    """
+
+    id: str
+    message: Message | None = None
+
+
+class ModifyMessageRequest(UpstreamModel):
+    """``schemas.ModifyMessageRequest``, the body of ``users.messages.modify``.
+
+    ``addClassificationLabels`` and ``removeClassificationLabelIds``, Classification
+    Label values of Google Workspace accounts, are not modelled: no task sends them.
+    ``dump_upstream`` gives the body under upstream's names.
+
+    Attributes:
+        add_label_ids: ``addLabelIds``, "A list of IDs of labels to add to this message.
+            You can add up to 100 labels with each update."
+        remove_label_ids: ``removeLabelIds``, "A list IDs of labels to remove from this
+            message. You can remove up to 100 labels with each update."
+    """
+
+    add_label_ids: list[str] = Field(default_factory=list, validation_alias="addLabelIds")
+    remove_label_ids: list[str] = Field(default_factory=list, validation_alias="removeLabelIds")
+
+
+class ComposePreview(UpstreamModel):
+    """What ``create_draft`` or ``send_message`` would send; nothing was sent or stored.
+
+    Returned while ``confirm`` is false. The headers are those of the message the task
+    built (``_compose``), as the standard library renders them, decoded: a header with
+    characters outside ASCII goes out RFC 2047 encoded. ``From`` is not among them: Gmail
+    sets it from the account.
+
+    Attributes:
+        performed: ``False``: nothing was sent. The tag that tells a preview from
+            upstream's answer, which a confirmed call returns.
+        endpoint: The operation the confirmed call sends, ``gmail.users.drafts.create``
+            or ``gmail.users.messages.send``.
+        action: What the confirmed call does, in one sentence.
+        thread_id: The ``threadId`` the confirmed call sends, the original's for a
+            reply; ``None`` for a new conversation.
+        headers: The message's To, Cc, Bcc, Subject, In-Reply-To and References, each
+            only when set, in that order.
+        body_lines: The body's first lines, ``PREVIEW_LINES`` (10) at most.
+        body_line_count: How many lines the body has, so a cut preview says so.
+    """
+
+    performed: Literal[False] = False
+    endpoint: str
+    action: str
+    thread_id: str | None
+    headers: list[MessagePartHeader]
+    body_lines: list[str]
+    body_line_count: int
+
+
+class ActionPreview(UpstreamModel):
+    """What ``delete_draft``, ``modify_message`` or ``trash_message`` would do; nothing was.
+
+    Returned while ``confirm`` is false; the preview reads nothing.
+
+    Attributes:
+        performed: ``False``: nothing was changed. The tag that tells a preview from
+            upstream's answer, which a confirmed call returns.
+        endpoint: The operation the confirmed call sends, e.g.
+            ``gmail.users.messages.trash``.
+        action: What the confirmed call does, in one sentence.
+        id: The draft's id (``delete_draft``) or the message's (the others).
+        add_label_ids: The label ids ``modify_message`` would add; ``[]`` otherwise.
+        remove_label_ids: The label ids ``modify_message`` would remove; ``[]``
+            otherwise.
+    """
+
+    performed: Literal[False] = False
+    endpoint: str
+    action: str
+    id: str
+    add_label_ids: list[str] = Field(default_factory=list)
+    remove_label_ids: list[str] = Field(default_factory=list)
+
+
+class DraftDeleted(UpstreamModel):
+    """``delete_draft``'s acknowledgement: upstream answers ``drafts.delete`` with no body.
+
+    Attributes:
+        performed: ``True``: upstream accepted the deletion.
+        id: The id of the draft deleted, "immediately and permanently", not trashed.
+    """
+
+    performed: Literal[True] = True
+    id: str
 
 
 class Attachment(UpstreamModel):
