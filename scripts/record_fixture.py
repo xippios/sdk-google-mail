@@ -24,7 +24,8 @@ parameters, named as upstream names them; ``id=`` fills the path of
 grant without ``gmail.modify`` upstream refuses it (the scope refusal, F19), and under one
 with it, an empty modify changes no label.
 
-The account is not a parameter. The recorder removes ``GOOGLE_ACCOUNTS`` from its own
+The account is not a parameter (``--account`` is no option and ``account=`` is refused).
+The recorder removes ``GOOGLE_ACCOUNTS`` from its own
 environment and records through ``client_for("demo")``'s configuration only, so it cannot
 reach another mailbox, in a client of its own that never retries
 (``RetryPolicy(max_attempts=1)``): a 5xx is recorded as it came and spends no quota on a
@@ -187,6 +188,8 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     if any("=" not in item for item in args.params):
         parser.error("parameters are key=value")
     args.params = {key: value for key, _, value in (item.partition("=") for item in args.params)}
+    if "account" in args.params:
+        parser.error("the recorder records the demo account only; account is not a parameter")
     if args.operation == TOKEN and (args.garbage_bearer or args.params):
         parser.error(f"{TOKEN} takes no parameters and no --garbage-bearer")
     if args.operation != TOKEN and (args.garbage_token or args.garbage_client):

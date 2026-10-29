@@ -7,13 +7,19 @@ values below are made up in the shapes Google's credentials take (``1//``, ``GOC
 
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import httpx
 import pytest
-from xippios.core.testing import REDACTED, Fixture, Scrub, fixture_from_response
+import respx
+from xippios.core import InvalidRequestError
+from xippios.core.testing import REDACTED, Fixture, ReplayFixture, Scrub, fixture_from_response
+
+from xippios.google.mail._client import DEMO, TENANTS
 
 ROOT = Path(__file__).resolve().parents[1]
 REFRESH = "1//made-up/refresh+token"  # pragma: allowlist secret
@@ -122,3 +128,69 @@ def test_the_command_line_refuses_what_it_does_not_record(
     with pytest.raises(SystemExit) as info:
         recorder.parse_args(argv)
     assert info.value.code == 2
+
+
+# The demo-only rule -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["get_profile", "ok", "--account", "work"],
+        ["get_profile", "ok", "--account=work"],
+        ["get_profile", "ok", "account=work"],
+        ["oauth2_token", "ok", "--account", "work"],
+    ],
+)
+def test_no_account_but_demo_can_be_named(
+    recorder: ModuleType, respx_mock: respx.MockRouter, argv: list[str]
+) -> None:
+    with pytest.raises(SystemExit) as info:
+        recorder.main(argv)
+    assert info.value.code == 2
+    assert not respx_mock.calls, "refused before any request"
+
+
+def test_the_recorder_reaches_demo_alone_whatever_is_declared(
+    recorder: ModuleType,
+    replay_fixture: ReplayFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """``GOOGLE_ACCOUNTS`` is dropped, and every client and auth is demo's."""
+    monkeypatch.setenv(TENANTS.list_var, "work")
+    monkeypatch.setenv(TENANTS.var("work", "REFRESH_TOKEN"), "work-token")
+    monkeypatch.setattr(recorder, "ROOT", tmp_path)
+    monkeypatch.setattr(recorder, "FIXTURES", tmp_path / "fixtures")
+    accounts: list[str] = []
+    for name in ("client_for", "refresh_auth"):
+        original = getattr(recorder, name)
+
+        def spy(account: str, *args: Any, _original: Any = original, **kwargs: Any) -> Any:
+            accounts.append(account)
+            return _original(account, *args, **kwargs)
+
+        monkeypatch.setattr(recorder, name, spy)
+    token = replay_fixture("oauth2_token", "ok")
+    profile = replay_fixture("get_profile", "ok")
+    assert recorder.main(["get_profile", "ok"]) == 0
+    assert TENANTS.list_var not in os.environ
+    assert set(accounts) == {DEMO}
+    assert (token.call_count, profile.call_count) == (1, 1)
+    assert (tmp_path / "fixtures" / "get_profile" / "ok.json").is_file()
+
+
+def test_without_demo_the_recorder_sends_nothing(
+    recorder: ModuleType,
+    respx_mock: respx.MockRouter,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv(TENANTS.var(DEMO, "REFRESH_TOKEN"))
+    monkeypatch.setenv(TENANTS.list_var, "work")
+    monkeypatch.setenv(TENANTS.var("work", "REFRESH_TOKEN"), "work-token")
+    monkeypatch.setattr(recorder, "FIXTURES", tmp_path / "fixtures")
+    with pytest.raises(InvalidRequestError, match=r"^unknown tenant 'demo'"):
+        recorder.main(["get_profile", "ok"])
+    assert not respx_mock.calls
+    assert not (tmp_path / "fixtures").exists()
