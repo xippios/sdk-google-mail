@@ -1,0 +1,57 @@
+{
+  "recorded_at": "2026-10-29T15:34:14.174149Z",
+  "request": {
+    "body": "{\"addLabelIds\":[\"STARRED\"],\"removeLabelIds\":[\"UNREAD\"]}",
+    "body_base64": false,
+    "content_type": "application/json",
+    "method": "POST",
+    "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages/1a1884b13e6018c2/modify"
+  },
+  "response": {
+    "body": "{\n  \"id\": \"1a1884b13e6018c2\",\n  \"threadId\": \"1a1884b13e6018c2\",\n  \"labelIds\": [\n    \"STARRED\",\n    \"TRASH\",\n    \"SENT\"\n  ]\n}\n",
+    "body_base64": false,
+    "headers": [
+      [
+        "content-type",
+        "application/json; charset=UTF-8"
+      ],
+      [
+        "vary",
+        "Origin"
+      ],
+      [
+        "vary",
+        "X-Origin"
+      ],
+      [
+        "vary",
+        "Referer"
+      ],
+      [
+        "date",
+        "Thu, 29 Oct 2026 15:34:13 GMT"
+      ],
+      [
+        "server",
+        "ESF"
+      ],
+      [
+        "x-xss-protection",
+        "0"
+      ],
+      [
+        "x-frame-options",
+        "SAMEORIGIN"
+      ],
+      [
+        "x-content-type-options",
+        "nosniff"
+      ],
+      [
+        "alt-svc",
+        "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+      ]
+    ],
+    "status": 200
+  }
+}

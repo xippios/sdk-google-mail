@@ -1,0 +1,57 @@
+{
+  "recorded_at": "2026-10-29T15:32:31.666144Z",
+  "request": {
+    "body": "{\n  \"message\": {}\n}\n",
+    "body_base64": false,
+    "content_type": "application/json",
+    "method": "POST",
+    "url": "https://gmail.googleapis.com/gmail/v1/users/me/drafts"
+  },
+  "response": {
+    "body": "{\n  \"id\": \"r-9011081075375667718\",\n  \"message\": {\n    \"id\": \"1a1884a8b41a6cc2\",\n    \"threadId\": \"1a1884a8b41a6cc2\",\n    \"labelIds\": [\n      \"DRAFT\"\n    ]\n  }\n}\n",
+    "body_base64": false,
+    "headers": [
+      [
+        "content-type",
+        "application/json; charset=UTF-8"
+      ],
+      [
+        "vary",
+        "Origin"
+      ],
+      [
+        "vary",
+        "X-Origin"
+      ],
+      [
+        "vary",
+        "Referer"
+      ],
+      [
+        "date",
+        "Thu, 29 Oct 2026 15:32:29 GMT"
+      ],
+      [
+        "server",
+        "ESF"
+      ],
+      [
+        "x-xss-protection",
+        "0"
+      ],
+      [
+        "x-frame-options",
+        "SAMEORIGIN"
+      ],
+      [
+        "x-content-type-options",
+        "nosniff"
+      ],
+      [
+        "alt-svc",
+        "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+      ]
+    ],
+    "status": 200
+  }
+}
