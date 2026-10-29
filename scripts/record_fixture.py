@@ -20,6 +20,18 @@ With ``R`` for ``direnv exec ~/github/sdk uv run scripts/record_fixture.py``::
     R get_message ok message_id=<a message id>
     R get_thread ok thread_id=<its thread id>
 
+and, under demo's write grant (``gmail.modify``), in this order::
+
+    R oauth2_token write
+    R create_draft ok subject="xippios-live draft" body=<text> confirm=true
+    R delete_draft ok draft_id=<the id create_draft/ok.json answered> confirm=true
+    R send_message ok subject="xippios-live send" body=<text> confirm=true
+    R create_draft reply subject="xippios-live reply" body=<text> in_reply_to_message_id=<the
+      id send_message/ok.json answered>
+    R trash_message ok message_id=<that id> confirm=true
+    R modify_message ok message_id=<that id> add_label_ids=STARRED remove_label_ids=UNREAD
+      confirm=true
+
 ``<operation>`` names the wrapper the fixture belongs to, the directory of conventions
 §10: the fixture lands at ``tests/fixtures/<operation>/<case>.json``. A read task's name
 in its place (``TASKS``) records through the task itself: ``key=value`` arguments are the
@@ -42,6 +54,27 @@ parameters, named as upstream names them; ``id=`` fills the path of
 ``messages_modify``, which sends an empty JSON body, ``{}``, and nothing else: under a
 grant without ``gmail.modify`` upstream refuses it (the scope refusal, F19), and under one
 with it, an empty modify changes no label.
+
+A write task's name (``WRITE_TASKS``) records through the task the same way, under the
+write safety rule (the briefing's "Write safety"): demo writes to itself only, and every
+message it writes carries ``MARK``, ``xippios-live``, in its Subject.
+
+- ``to``, ``cc`` and ``bcc`` are no parameters of a recording, refused before any
+  request: a composing task (``create_draft``, ``send_message``) is sent to demo's own
+  address alone, which the recorder reads from ``users.getProfile`` at the moment it
+  records (1 unit, not recorded), never from a file or a variable; ``self_only`` then
+  refuses, before the task runs, a To, Cc or Bcc that is not that address.
+- A composing task's ``subject`` carries ``MARK``, or the recording is refused before any
+  request. ``modify_message`` and ``trash_message`` read the message's Subject first
+  (``format=metadata``, 20 units, not recorded) and refuse one without the marker;
+  ``delete_draft`` deletes the draft ``create_draft`` recorded, by its id.
+- ``confirm=true`` makes the write; without it the task previews, and a preview that
+  reads (a reply's, the original's metadata) records that read.
+
+The request a write records holds its JSON body; ``MessageScrub`` reads it as it reads an
+answer, so its ``raw``, the whole message with demo's address and the text, is dropped
+and every other string scrubbed, and ``check`` refuses a request body that still holds a
+``raw``.
 
 The account is not a parameter (``--account`` is no option and ``account=`` is refused).
 The recorder removes ``GOOGLE_ACCOUNTS`` from its own
@@ -132,6 +165,7 @@ import sys
 import types
 import typing
 from collections.abc import Awaitable, Callable, Generator, Iterator, Sequence
+from email.utils import getaddresses
 from pathlib import Path
 from typing import Any, TypeGuard
 from urllib.parse import parse_qsl, quote, quote_plus, unquote_plus, urlencode
@@ -140,7 +174,7 @@ import httpx
 from xippios.core import AsyncClient, RetryPolicy, XippiosError, sync
 from xippios.core.testing import REDACTED, Fixture, Scrub, fixture_from_response, fixture_path
 
-from xippios.google.mail import tasks
+from xippios.google.mail import api, tasks, tasks_write
 from xippios.google.mail._auth import (
     CLIENT_ID_ENV,
     CLIENT_SECRET_ENV,
@@ -207,12 +241,32 @@ TASKS: dict[str, Callable[..., Awaitable[Any]]] = {
 }
 """The read tasks recorded through themselves, by name (fixture directory); module doc."""
 
+WRITE_TASKS: dict[str, Callable[..., Awaitable[Any]]] = {
+    "create_draft": tasks_write.create_draft_async,
+    "delete_draft": tasks_write.delete_draft_async,
+    "send_message": tasks_write.send_message_async,
+    "trash_message": tasks_write.trash_message_async,
+    "modify_message": tasks_write.modify_message_async,
+}
+"""The write tasks recorded through themselves, under the write safety rule (module doc)."""
+RECORDED_TASKS = TASKS | WRITE_TASKS
+MARK = "xippios-live"
+"""The marker every message demo writes carries in its Subject."""
+COMPOSING = frozenset({"create_draft", "send_message"})
+"""The write tasks that build a message: sent to demo's own address alone."""
+MARKED_MESSAGES = frozenset({"modify_message", "trash_message"})
+"""The write tasks that change a message: only one whose Subject carries ``MARK``."""
+RECIPIENTS = ("to", "cc", "bcc")
+"""The address parameters, which the recorder fills and the command line never names."""
 
-def units_of(url: str) -> int | None:
-    """The quota units of a Gmail GET at ``url`` (``quota.md``); ``None`` for another path.
+
+def units_of(url: str, method: str = "GET") -> int | None:
+    """The quota units of a Gmail call at ``url`` (``quota.md``); ``None`` for another one.
 
     ``messages.get`` costs 20, 60 with ``format`` ``full`` (its default) or ``raw``;
-    ``threads.get`` 40, 120 with ``format`` ``full`` (its default).
+    ``threads.get`` 40, 120 with ``format`` ``full`` (its default); the writes
+    ``drafts.create`` 10, ``drafts.delete`` 10, ``messages.send`` 100,
+    ``messages.modify`` 5 and ``messages.trash`` 20.
     """
     parsed = httpx.URL(url)
     base = httpx.URL(BASE_URL).path + "/"
@@ -220,6 +274,19 @@ def units_of(url: str) -> int | None:
         return None
     segments = parsed.path.removeprefix(base).split("/")
     form = parsed.params.get("format", "full")
+    if method == "POST":
+        match segments:
+            case ["drafts"]:
+                return 10
+            case ["messages", "send"]:
+                return 100
+            case ["messages", _, "modify"]:
+                return 5
+            case ["messages", _, "trash"]:
+                return 20
+        return None
+    if method == "DELETE":
+        return 10 if len(segments) == 2 and segments[0] == "drafts" else None
     match segments:
         case ["profile"] | ["labels"]:
             return 1
@@ -245,15 +312,19 @@ def task_arguments(name: str, pairs: Sequence[tuple[str, str]]) -> dict[str, Any
     """The keyword arguments of task ``name`` from ``key=value`` pairs, typed by its signature.
 
     A ``list`` parameter collects its repeated pairs, a ``bool`` takes ``true`` or
-    ``false``, an ``int`` digits; ``account`` is never one, the recorder's account is demo.
+    ``false``, an ``int`` digits; ``account`` is never one, the recorder's account is demo,
+    and neither are a composing task's ``to``, ``cc`` and ``bcc``, which it fills.
 
     Raises:
         ValueError: An unknown or repeated parameter, a value of the wrong kind or a
             required parameter missing.
     """
-    fn = TASKS[name]
+    fn = RECORDED_TASKS[name]
     hints = typing.get_type_hints(fn)
-    parameters = {key: p for key, p in inspect.signature(fn).parameters.items() if key != "account"}
+    filled = ("account", *RECIPIENTS) if name in COMPOSING else ("account",)
+    parameters = {
+        key: p for key, p in inspect.signature(fn).parameters.items() if key not in filled
+    }
     values: dict[str, Any] = {}
     for key, raw in pairs:
         if key not in parameters:
@@ -472,8 +543,8 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "operation",
-        help=f"{TOKEN}, a Gmail operation ({', '.join(sorted(OPERATIONS))}) or a read task "
-        f"({', '.join(sorted(TASKS))})",
+        help=f"{TOKEN}, a Gmail operation ({', '.join(sorted(OPERATIONS))}), a read task "
+        f"({', '.join(sorted(TASKS))}) or a write task ({', '.join(sorted(WRITE_TASKS))})",
     )
     parser.add_argument("case", help="fixture name, e.g. ok")
     parser.add_argument(
@@ -494,10 +565,10 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         help="a Gmail operation: a nonsense bearer and no refresh",
     )
     args = parser.parse_intermixed_args(argv)
-    if args.operation != TOKEN and args.operation not in OPERATIONS | TASKS.keys():
+    if args.operation != TOKEN and args.operation not in OPERATIONS | RECORDED_TASKS.keys():
         parser.error(
             f"operation {args.operation!r}: use {TOKEN}, one of {sorted(OPERATIONS)} or a task "
-            f"of {sorted(TASKS)}"
+            f"of {sorted(RECORDED_TASKS)}"
         )
     if not _CASE.fullmatch(args.case):
         parser.error(f"case {args.case!r}: use lower-case letters, digits and underscores")
@@ -507,15 +578,22 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     args.params = dict(pairs)
     if "account" in args.params:
         parser.error("the recorder records the demo account only; account is not a parameter")
-    if args.operation in TASKS:
+    if args.operation in RECORDED_TASKS:
         if args.garbage_token or args.garbage_client or args.garbage_bearer:
             parser.error(
                 "a task records under demo's own grant; the --garbage modes are not for it"
+            )
+        if args.operation in COMPOSING and set(args.params) & set(RECIPIENTS):
+            parser.error(
+                "demo writes to itself only: the recorder sends to demo's own address, read "
+                "from users.getProfile; to, cc and bcc are not parameters"
             )
         try:
             args.task_arguments = task_arguments(args.operation, pairs)
         except ValueError as refused:
             parser.error(str(refused))
+        if args.operation in COMPOSING and MARK not in args.task_arguments["subject"]:
+            parser.error(f"every message demo writes carries {MARK} in its subject")
         return args
     if args.operation == TOKEN and (args.garbage_bearer or args.params):
         parser.error(f"{TOKEN} takes no parameters and no --garbage-bearer")
@@ -529,6 +607,63 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         if operation.method == "POST" and set(args.params) - set(operation.path_params):
             parser.error(f"{args.operation} sends an empty body and takes only its path's id")
     return args
+
+
+def self_only(arguments: dict[str, Any], own: str) -> None:
+    """Refuse a To, Cc or Bcc that is not demo's own address ``own``; never print one.
+
+    Args:
+        arguments: A composing task's keyword arguments, e.g. ``{"to": [own], ...}``.
+        own: Demo's address, as ``users.getProfile`` answered it.
+
+    Raises:
+        ValueError: An address of ``to``, ``cc`` or ``bcc`` is not ``own``, or ``to`` is
+            empty; the message names the parameter, never the address.
+    """
+    if not arguments.get("to"):
+        raise ValueError("to names no address; demo writes to itself")
+    for name in RECIPIENTS:
+        for value in arguments.get(name) or []:
+            found = getaddresses([value])
+            if len(found) != 1 or found[0][1].lower() != own.lower():
+                raise ValueError(f"{name} holds an address other than demo's own")
+
+
+async def demo_address_async() -> str:
+    """Demo's own address, from ``users.getProfile`` (1 unit), outside any recording."""
+    profile = await api.get_profile(client_for(DEMO))
+    return profile.email_address
+
+
+async def is_marked_async(message_id: str) -> bool:
+    """Whether the message's Subject carries ``MARK`` (``format=metadata``, 20 units)."""
+    message = await api.messages_get(
+        client_for(DEMO), message_id, format="metadata", metadata_headers=["Subject"]
+    )
+    headers = message.payload.headers if message.payload is not None else []
+    return any(h.name.lower() == "subject" and MARK in h.value for h in headers)
+
+
+def prepare_write(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """A write task's arguments under the write safety rule, checked before it runs.
+
+    A composing task is addressed to demo's own address alone (``to``), which
+    ``self_only`` checks; a message to modify or trash must carry ``MARK``.
+
+    Raises:
+        ValueError: The rule refuses the recording; the message names why, never a value.
+    """
+    if name in COMPOSING:
+        own = sync(demo_address_async)()
+        print("checked: GET profile (1 quota unit)")  # noqa: T201
+        arguments = {**arguments, "to": [own]}
+        self_only(arguments, own)
+    elif name in MARKED_MESSAGES:
+        marked = sync(is_marked_async)(arguments["message_id"])
+        print("checked: GET the message's Subject (20 quota units)")  # noqa: T201
+        if not marked:
+            raise ValueError(f"the message's subject carries no {MARK}")
+    return arguments
 
 
 def secret_values() -> list[str]:
@@ -605,9 +740,9 @@ def scrub_form(body: str) -> str:
 def rewrite(fixture: Fixture, secrets: Sequence[str]) -> Fixture:
     """The recorder's own step on core's ``Fixture``: the module docstring's list.
 
-    ``MessageScrub`` reads the response body as JSON first, one instance for the
-    fixture's URL and body, then the secrets in their encoded forms and
-    ``TEXT_REWRITES`` run over every location.
+    ``MessageScrub`` reads a JSON request body and the response body as JSON first, one
+    instance for the fixture's URL and bodies, then the secrets in their encoded forms
+    and ``TEXT_REWRITES`` run over every location.
     """
     pattern = _secret_pattern(secrets)
     messages = MessageScrub()
@@ -622,6 +757,8 @@ def rewrite(fixture: Fixture, secrets: Sequence[str]) -> Fixture:
     request = fixture.request
     body = request.body
     if body is not None and not request.body_base64:
+        if (request.content_type or "").startswith("application/json"):
+            body = messages.body(body)  # a write's body: its raw goes
         body = text(body)
         if (request.content_type or "").startswith("application/x-www-form-urlencoded"):
             body = scrub_form(body)
@@ -721,6 +858,16 @@ def check(text: str, fixture: Fixture, secrets: Sequence[str]) -> list[str]:
             decoded = None
         texts.extend(_strings(decoded))
         message_leaks, bodies = _message_leaks(decoded, fixture.request.url)
+    sent = fixture.request.body
+    if sent and not fixture.request.body_base64:
+        try:
+            sent_decoded = json.loads(sent)
+        except ValueError:
+            sent_decoded = None
+        texts.extend(_strings(sent_decoded))
+        sent_leaks, sent_bodies = _message_leaks(sent_decoded, "")
+        message_leaks += [f"{leak}, in the request body" for leak in sent_leaks]
+        bodies += sent_bodies
     unquoted = [unquote_plus(item) for item in texts]  # a form body's or a query's
     decoded_bodies = [*bodies, *(unquote_plus(item) for item in bodies)]
     texts = [*texts, *unquoted, *decoded_bodies]
@@ -853,6 +1000,8 @@ exchange = sync(exchange_async)
 async def task_exchanges_async(name: str, arguments: dict[str, Any]) -> list[httpx.Response]:
     """Run task ``name`` for demo through the recorder's client; every Gmail response.
 
+    A write task's arguments have passed ``prepare_write``.
+
     The registry is emptied and handed the recorder's client as demo's
     (``TENANTS.client_for``), so the task's own ``client_for("demo")`` returns it; the
     recording refuses to run if it does not.
@@ -868,27 +1017,36 @@ async def task_exchanges_async(name: str, arguments: dict[str, Any]) -> list[htt
         client_for(DEMO) is not client
     ):
         raise RuntimeError("the task would not send through the recorder's client")
-    await TASKS[name](DEMO, **arguments)
+    await RECORDED_TASKS[name](DEMO, **arguments)
     return responses
 
 
 task_exchanges = sync(task_exchanges_async)
 
 
-def _units(url: str) -> str:
-    units = units_of(url)
+def _units(url: str, method: str = "GET") -> str:
+    units = units_of(url, method)
     return "" if units is None else f" ({units} quota unit{'s' if units != 1 else ''})"
 
 
 def record_task(args: argparse.Namespace) -> int:
-    """Record every Gmail exchange of a read task, each checked before any is written."""
+    """Record every Gmail exchange of a task, each checked before any is written.
+
+    A write task passes ``prepare_write`` first, the write safety rule.
+    """
+    arguments = args.task_arguments
     try:
-        responses = task_exchanges(args.operation, args.task_arguments)
+        if args.operation in WRITE_TASKS:
+            arguments = prepare_write(args.operation, arguments)
+        responses = task_exchanges(args.operation, arguments)
+    except ValueError as refused:  # the write safety rule; names why, never a value
+        print(f"nothing written: {args.operation} refused: {refused}")  # noqa: T201
+        return 1
     except XippiosError as error:  # its message names the method and path, never a value
         print(f"nothing written: {args.operation} raised {type(error).__name__}: {error}")  # noqa: T201
         return 1
     for response in responses:
-        spent = _units(str(response.request.url))
+        spent = _units(str(response.request.url), response.request.method)
         print(f"sent: {response.request.method} {response.status_code}{spent}")  # noqa: T201
     if not responses:
         print(f"nothing written: {args.operation} sent no Gmail request")  # noqa: T201
@@ -924,7 +1082,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Record, scrub in memory, check, write; return the exit status."""
     args = parse_args(argv)
     os.environ.pop(TENANTS.list_var, None)  # the recorder sees the demo account only
-    if args.operation in TASKS:
+    if args.operation in RECORDED_TASKS:
         return record_task(args)
     path = fixture_path(FIXTURES, args.operation, args.case)
     response, units = exchange(args)
