@@ -23,11 +23,12 @@ parts' MIME roles (conventions §3), and ``SearchRow``, a message's three metada
 beside its ids and snippet.
 """
 
+import re
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import BeforeValidator, Field
+from pydantic import AwareDatetime, BeforeValidator, Field
 from xippios.core import UpstreamModel
 
 __all__ = [
@@ -72,22 +73,43 @@ class Profile(UpstreamModel):
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 
-def _from_epoch_millis(value: object) -> object:
-    """``"1793267674000"`` → ``2026-10-29 09:54:34+00:00``; a ``datetime`` passes as it is.
+_INTEGER = re.compile(r"-?[0-9]+")
+"""An integer as text: ASCII digits, an optional leading minus and nothing else."""
+
+
+def _from_epoch_millis(value: object) -> datetime:
+    """``"1793267674000"`` → ``2026-10-29 09:54:34+00:00``; an aware ``datetime`` as it is.
 
     The milliseconds are added to the epoch as an integer, so none is lost to a float.
+    Every other shape is refused with a ``ValueError`` that names the shape, never the
+    value, which pydantic and core's ``parse`` turn into a ``ValidationError``: text that
+    is not an integer (``"+123"``, ``"1793267674.5"``, ISO text), a ``float``, a ``bool``,
+    a ``datetime`` without a zone, and a count of milliseconds outside the years 1 to
+    9999 (Python's ``OverflowError``, which would otherwise escape pydantic bare).
     """
-    if isinstance(value, str) and value.lstrip("-").isdigit():
-        return _EPOCH + timedelta(milliseconds=int(value))
-    if isinstance(value, int) and not isinstance(value, bool):
-        return _EPOCH + timedelta(milliseconds=value)
-    return value
+    if isinstance(value, datetime):
+        if value.utcoffset() is None:
+            raise ValueError("a datetime without a zone; an aware datetime is taken as it is")
+        return value
+    if isinstance(value, str) and _INTEGER.fullmatch(value):
+        millis = int(value)
+    elif isinstance(value, int) and not isinstance(value, bool):
+        millis = value
+    else:
+        shape = "text that is not an integer" if isinstance(value, str) else type(value).__name__
+        raise ValueError(f"epoch milliseconds are an integer, as text or an int, not {shape}")
+    try:
+        return _EPOCH + timedelta(milliseconds=millis)
+    except OverflowError:
+        raise ValueError("epoch milliseconds outside the years 1 to 9999") from None
 
 
-EpochMillis = Annotated[datetime, BeforeValidator(_from_epoch_millis)]
+EpochMillis = Annotated[AwareDatetime, BeforeValidator(_from_epoch_millis)]
 """A time upstream sends as a string of milliseconds since the epoch, as an aware UTC
-``datetime`` (``internalDate``, format ``int64``); a ``datetime`` is kept, other text goes
-to pydantic's own parsing, which refuses what is no time."""
+``datetime`` (``internalDate``, format ``int64``). It takes an integer as text (an
+optional leading minus, then ASCII digits) or as an ``int``, and an aware ``datetime``,
+which it keeps as it is; anything else, naive datetimes and other numeric text included,
+is refused as a ``ValidationError``."""
 
 
 class LabelType(StrEnum):

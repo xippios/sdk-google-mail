@@ -11,7 +11,7 @@ discovery document's shape: they test the decoder, not a fixture.
 
 import base64
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +19,7 @@ import httpx
 import pydantic
 import pytest
 import respx
-from xippios.core import InvalidRequestError, ResultCap, ValidationError, sync
+from xippios.core import InvalidRequestError, ResultCap, ValidationError, parse, sync
 from xippios.core.mcp import cap_result
 from xippios.core.testing import (
     Fixture,
@@ -466,6 +466,56 @@ def test_internal_date_is_parsed_to_an_aware_utc_datetime() -> None:
     assert Message.model_validate({"id": "m1"}).internal_date is None
     with pytest.raises(pydantic.ValidationError):
         Message.model_validate({"id": "m1", "internalDate": "soon"})
+
+
+def test_internal_date_keeps_an_aware_datetime_as_it_is() -> None:
+    sent_at = datetime(2026, 10, 29, 10, 54, 34, tzinfo=timezone(timedelta(hours=1)))
+    message = Message.model_validate({"id": "m1", "internalDate": sent_at})
+    assert message.internal_date == sent_at
+    assert message.internal_date is not None
+    assert message.internal_date.utcoffset() == timedelta(hours=1), "unchanged, zone and all"
+    assert Message.model_validate({"id": "m1", "internalDate": -1}).internal_date == datetime(
+        1969, 12, 31, 23, 59, 59, 999000, tzinfo=UTC
+    ), "an int, a minus allowed"
+
+
+@pytest.mark.parametrize(
+    ("value", "says"),
+    [
+        ("253402300800000", "outside the years 1 to 9999"),
+        ("-62135596800001", "outside the years 1 to 9999"),
+        ("9" * 30, "outside the years 1 to 9999"),
+        (10**30, "outside the years 1 to 9999"),
+        ("+123", "not text that is not an integer"),
+        ("1793267674.5", "not text that is not an integer"),
+        ("2026-10-29T09:54:34", "not text that is not an integer"),
+        ("", "not text that is not an integer"),
+        (1793267674.5, "not float"),
+        (True, "not bool"),
+        (datetime(2026, 10, 29, 9, 54, 34), "a datetime without a zone"),
+    ],
+    ids=[
+        "year-10000",
+        "year-0",
+        "past-c-int-text",
+        "past-c-int",
+        "plus-sign",
+        "decimal-text",
+        "zone-less-iso",
+        "empty",
+        "float",
+        "bool",
+        "naive",
+    ],
+)
+def test_internal_date_refuses_every_other_shape(value: object, says: str) -> None:
+    """A refusal is core's ``ValidationError``, naming the shape and never the value."""
+    with pytest.raises(ValidationError) as info:
+        parse(Message, {"id": "m1", "internalDate": value}, source=SOURCE, endpoint=GET)
+    assert "first at internalDate (value_error)" in info.value.message
+    assert says in info.value.message
+    if isinstance(value, str) and value:
+        assert value not in info.value.message
 
 
 # the decoder, on messages built in memory --------------------------------------------
