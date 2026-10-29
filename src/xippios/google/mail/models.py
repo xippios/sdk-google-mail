@@ -5,11 +5,13 @@ them in snake_case; where upstream spells a field differently (``emailAddress``)
 ``Field(validation_alias=...)`` accepts that spelling on input, never ``alias=``, which the
 adapters would serialise, so results serialise under the snake_case names in Python, over
 MCP and over HTTP alike. Types follow the schemas of ``docs/upstream/discovery.json``: an
-``integer`` is an ``int``; a ``uint64`` or ``int64`` that upstream sends as a JSON string,
-an id such as ``historyId`` or the epoch milliseconds of ``internalDate``, stays the
-string it is. A documented value set is a ``StrEnum`` written here (``LabelType``), since
-no packaged list renders it into ``enums.py``. A field the schema has and an answer may
-leave out is ``None`` by default, a list ``[]``.
+``integer`` is an ``int``; a ``uint64`` id that upstream sends as a JSON string,
+``historyId``, stays the string it is; ``internalDate``, a timestamp upstream sends as
+a string of epoch milliseconds, is parsed to an aware UTC ``datetime``
+(``EpochMillis``), since conventions §3 types dates and times. A documented value set is
+a ``StrEnum`` written here (``LabelType``), since no packaged list renders it into
+``enums.py``. A field the schema has and an answer may leave out is ``None`` by default,
+a list ``[]``.
 
 Two kinds of model live here. The read models of the endpoint wrappers are faithful
 (ADR-0003): ``Label``, ``ListLabelsResponse``, ``MessageRef``, ``ListMessagesResponse``,
@@ -21,14 +23,17 @@ parts' MIME roles (conventions §3), and ``SearchRow``, a message's three metada
 beside its ids and snippet.
 """
 
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from typing import Annotated
 
-from pydantic import Field
+from pydantic import BeforeValidator, Field
 from xippios.core import UpstreamModel
 
 __all__ = [
     "Attachment",
     "DecodedMessage",
+    "EpochMillis",
     "Label",
     "LabelColor",
     "LabelListVisibility",
@@ -62,6 +67,27 @@ class Profile(UpstreamModel):
     messages_total: int = Field(validation_alias="messagesTotal")
     threads_total: int = Field(validation_alias="threadsTotal")
     history_id: str = Field(validation_alias="historyId")
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _from_epoch_millis(value: object) -> object:
+    """``"1793267674000"`` → ``2026-10-29 09:54:34+00:00``; a ``datetime`` passes as it is.
+
+    The milliseconds are added to the epoch as an integer, so none is lost to a float.
+    """
+    if isinstance(value, str) and value.lstrip("-").isdigit():
+        return _EPOCH + timedelta(milliseconds=int(value))
+    if isinstance(value, int) and not isinstance(value, bool):
+        return _EPOCH + timedelta(milliseconds=value)
+    return value
+
+
+EpochMillis = Annotated[datetime, BeforeValidator(_from_epoch_millis)]
+"""A time upstream sends as a string of milliseconds since the epoch, as an aware UTC
+``datetime`` (``internalDate``, format ``int64``); a ``datetime`` is kept, other text goes
+to pydantic's own parsing, which refuses what is no time."""
 
 
 class LabelType(StrEnum):
@@ -261,7 +287,7 @@ class Message(UpstreamModel):
             message.", a ``uint64`` sent as a string, kept as sent.
         internal_date: ``internalDate``, "The internal message creation timestamp (epoch
             ms), which determines ordering in the inbox.", an ``int64`` sent as a string
-            of epoch milliseconds, kept as sent.
+            of epoch milliseconds, parsed to an aware UTC ``datetime``.
         size_estimate: ``sizeEstimate``, "Estimated size in bytes of the message."
         payload: "The parsed email structure in the message parts."
     """
@@ -271,7 +297,7 @@ class Message(UpstreamModel):
     label_ids: list[str] = Field(default_factory=list, validation_alias="labelIds")
     snippet: str | None = None
     history_id: str | None = Field(default=None, validation_alias="historyId")
-    internal_date: str | None = Field(default=None, validation_alias="internalDate")
+    internal_date: EpochMillis | None = Field(default=None, validation_alias="internalDate")
     size_estimate: int | None = Field(default=None, validation_alias="sizeEstimate")
     payload: MessagePart | None = None
 
@@ -329,7 +355,8 @@ class DecodedMessage(UpstreamModel):
         id: The message's ``id``.
         thread_id: Its ``threadId``.
         label_ids: Its ``labelIds``.
-        internal_date: Its ``internalDate``, the string of epoch milliseconds as served.
+        internal_date: Its ``internalDate``, an aware UTC ``datetime``, e.g.
+            ``2026-10-29T09:54:34Z`` over MCP and HTTP.
         size_estimate: Its ``sizeEstimate``.
         snippet: Its ``snippet``.
         headers: The top-level part's headers named From, To, Cc, Bcc, Date, Subject,
@@ -344,7 +371,7 @@ class DecodedMessage(UpstreamModel):
     id: str
     thread_id: str | None
     label_ids: list[str]
-    internal_date: str | None
+    internal_date: EpochMillis | None
     size_estimate: int | None
     snippet: str | None
     headers: list[MessagePartHeader]

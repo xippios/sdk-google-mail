@@ -12,6 +12,8 @@ two messages, 5 + 2 x 20; ``messages.get`` with ``format=full`` 60; ``threads.ge
 ``format=full`` 120. ``list_accounts`` sends nothing.
 """
 
+from datetime import timedelta
+
 import pytest
 
 from xippios.google.mail import tasks
@@ -94,7 +96,8 @@ def test_get_message_decodes_a_message(demo_account: str) -> None:
     assert {"from", "date"} <= names
     assert view.text is None or isinstance(view.text, str)
     assert view.html is None
-    assert (view.internal_date or "").isdigit()
+    assert view.internal_date is not None
+    assert view.internal_date.utcoffset() == timedelta(0), "an aware UTC datetime"
     assert result.meta.endpoint == "gmail.users.messages.get"
 
 

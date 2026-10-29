@@ -11,11 +11,12 @@ discovery document's shape: they test the decoder, not a fixture.
 
 import base64
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import httpx
+import pydantic
 import pytest
 import respx
 from xippios.core import InvalidRequestError, ResultCap, ValidationError, sync
@@ -283,7 +284,10 @@ def test_get_message_returns_the_decoded_view(replay_fixture: ReplayFixture) -> 
         html=None,
         attachments=[],
     )
-    assert view.internal_date == message["internalDate"], "epoch milliseconds as served"
+    epoch = datetime(1970, 1, 1, tzinfo=UTC)
+    assert view.internal_date == epoch + timedelta(milliseconds=int(message["internalDate"]))
+    assert view.internal_date is not None
+    assert view.internal_date.utcoffset() == timedelta(0), "an aware UTC datetime"
     kept = [h for h in message["payload"]["headers"] if h["name"].lower() in KEPT]
     assert [(h.name, h.value) for h in view.headers] == [(h["name"], h["value"]) for h in kept]
     names = {h["name"] for h in message["payload"]["headers"]}
@@ -321,6 +325,10 @@ async def test_get_message_over_mcp(replay_fixture: ReplayFixture) -> None:
     assert payload["data"]["text"] == part_text(message, "text/plain")
     assert payload["data"]["html"] is None
     assert sorted(payload["data"]) == sorted(DecodedMessage.model_fields)
+    sent_at = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(
+        milliseconds=int(message["internalDate"])
+    )
+    assert payload["data"]["internal_date"] == sent_at.isoformat().replace("+00:00", "Z")
     with_html = await mcp_call(
         server, "google_mail_get_message", {**arguments, "include_html": True}
     )
@@ -447,6 +455,16 @@ def test_a_long_message_comes_back_as_a_preview_and_the_note(
     assert "resume with start" not in capped["note"]
     assert capped["preview"].startswith('{"data":{"id":')
     assert len(capped["preview"].encode()) <= ResultCap().max_bytes
+
+
+def test_internal_date_is_parsed_to_an_aware_utc_datetime() -> None:
+    """``internalDate``, epoch milliseconds as a string, kept to the millisecond."""
+    message = Message.model_validate({"id": "m1", "internalDate": "1793267674123"})
+    assert message.internal_date == datetime(2026, 10, 29, 9, 54, 34, 123000, tzinfo=UTC)
+    assert message.model_dump(mode="json")["internal_date"] == "2026-10-29T09:54:34.123000Z"
+    assert Message.model_validate({"id": "m1"}).internal_date is None
+    with pytest.raises(pydantic.ValidationError):
+        Message.model_validate({"id": "m1", "internalDate": "soon"})
 
 
 # the decoder, on messages built in memory --------------------------------------------
