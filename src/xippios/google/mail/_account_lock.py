@@ -1,19 +1,21 @@
 # Queue row 281: a copy of sdk-cashctrl's kit, which returns to xippios-core in 0.4.0 with
 # its two consumers (ADR-0023, decision 4; ADR-0025, D-d); this package adopts it at 0.2.0.
+# One change: instructions() takes the bound server's own base text, since the copy kept
+# the unbound text ("every other tool takes account") ahead of the lock sentence.
 """The ``--account`` lock: tools bound to one account, so no tool takes ``account``.
 
 Copied from sdk-cashctrl's ``src/xippios/cashctrl/_org_lock.py`` at
 ``6db155b9f80e20b17b1533db66134b9eb2144c46`` (``main``, release 0.3.0), its ``--org`` lock,
-with ``account`` for ``org`` and ``AccountLock`` for ``OrgLock``; nothing else changed
-(ADR-0024; ADR-0025, D-d). The lock is no middleware but a wrapper: given ``--account
-<name>``, ``bind_tasks`` hands ``build_server`` tools on which ``account`` is bound when
-the server is built. Each wrapper keeps its task's ``__name__``, so tool names and
+with ``account`` for ``org`` and ``AccountLock`` for ``OrgLock``, and ``instructions``
+taking ``bound=``, the bound server's own base text (ADR-0024; ADR-0025, D-d). The lock
+is no middleware but a wrapper: given ``--account <name>``, ``bind_tasks`` hands
+``build_server`` tools on which ``account`` is bound when the server is built. Each wrapper keeps its task's ``__name__``, so tool names and
 ``MCP_CAPS`` keys stay as they are, and its docstring without the ``account`` line under
 ``Args:``; its signature and annotations leave ``account`` out, so no tool's input schema
 declares it, and it calls the task with ``account=<name>``. The account list of a bound
 server lists that account only (``_only_the_locked_tenant``), still with ``meta.tenant``
-``None``. The server's instructions gain one sentence naming the account
-(``lock_sentence``).
+``None``. The server's instructions are its bound text, which says nothing of an
+``account`` argument, followed by one sentence naming the account (``lock_sentence``).
 
 sdk-cashctrl kept from sdk-core's ``cb8ecdf379c04522e5f1dcd91ea5e8bdfa1fb3ff``
 (``src/xippios/core/mcp/server.py``): ``TenantLock``'s validation of the parameter and
@@ -71,11 +73,21 @@ def lock_sentence(lock: AccountLock) -> str:
     )
 
 
-def instructions(base: str | None, lock: AccountLock | None) -> str | None:
-    """``base``, followed by ``lock_sentence`` when the server is bound; ``base`` when not."""
+def instructions(
+    base: str | None, lock: AccountLock | None, *, bound: str | None = None
+) -> str | None:
+    """A server's instructions: ``base`` unbound; bound, ``bound`` and ``lock_sentence``.
+
+    Args:
+        base: The unbound server's text, which may tell an agent that every tool takes
+            ``account``.
+        lock: The account the server is bound to, or ``None``.
+        bound: The bound server's text, which must not say that a tool takes
+            ``account``; ``None`` uses ``base``, as sdk-cashctrl's copy does.
+    """
     if lock is None:
         return base
-    return " ".join(filter(None, [base, lock_sentence(lock)]))
+    return " ".join(filter(None, [base if bound is None else bound, lock_sentence(lock)]))
 
 
 def _only_the_locked_tenant(lock: AccountLock, result: Any) -> Any:

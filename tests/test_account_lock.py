@@ -331,7 +331,9 @@ async def test_the_entry_point_binds_to_the_account(
     assert transport == "stdio"
     assert server is not mcp.server
     assert server.name == mcp.server.name
-    assert server.instructions == f"{mcp.INSTRUCTIONS} {SENTENCE}"
+    assert server.instructions == f"{mcp.BOUND_INSTRUCTIONS} {SENTENCE}"
+    assert "takes account" not in (server.instructions or ""), "no word of an account argument"
+    assert "takes account" in (mcp.server.instructions or ""), "the unbound text keeps it"
     bound = {tool.name: tool for tool in await server.list_tools()}
     unbound = {tool.name: tool for tool in await mcp.server.list_tools()}
     assert bound.keys() == unbound.keys(), "the same tools, by name"
@@ -350,6 +352,13 @@ async def test_a_bound_server_names_the_account_in_its_instructions(
         assert client.instructions == f"Gmail via xippios. {SENTENCE}"
     assert lock_sentence(LOCK) == SENTENCE
     assert instructions(None, LOCK) == SENTENCE
+
+
+def test_a_bound_server_s_text_replaces_the_unbound_one() -> None:
+    unbound = "Every tool takes account."
+    assert instructions(unbound, None, bound="Bound.") == unbound
+    assert instructions(unbound, LOCK, bound="Bound.") == f"Bound. {SENTENCE}"
+    assert instructions(unbound, LOCK) == f"{unbound} {SENTENCE}", "the copy's behaviour"
 
 
 async def test_an_unlocked_server_keeps_its_instructions(

@@ -24,6 +24,12 @@ INSTRUCTIONS = (
     "answered with the declared ones. "
     "Call the list tools (google_mail_list_*) first to find valid values, then query."
 )
+BOUND_INSTRUCTIONS = (
+    "Gmail via xippios. "
+    "Tools are read-only. "
+    "Call the list tools (google_mail_list_*) first to find valid values, then query."
+)
+"""The text of a server ``--account`` binds; the lock's sentence names the account."""
 
 
 def build(lock: AccountLock | None = None) -> MCPServer:
@@ -32,7 +38,7 @@ def build(lock: AccountLock | None = None) -> MCPServer:
         SOURCE,
         bind_tasks([getattr(tasks, name) for name in tasks.__all__], lock),
         version=__version__,
-        instructions=instructions(INSTRUCTIONS, lock),
+        instructions=instructions(INSTRUCTIONS, lock, bound=BOUND_INSTRUCTIONS),
         caps=getattr(tasks, "MCP_CAPS", None),
     )
 
