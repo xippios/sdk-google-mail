@@ -58,7 +58,7 @@ def refresh_exchange() -> httpx.Response:
 
 def profile_exchange() -> httpx.Response:
     request = httpx.Request("GET", "https://gmail.googleapis.com/gmail/v1/users/me/profile")
-    body = {"emailAddress": "someone.else@gmail.com", "messagesTotal": 3}
+    body = {"emailAddress": "someone.else@example.org", "messagesTotal": 3}
     return httpx.Response(200, json=body, request=request)
 
 
@@ -277,11 +277,11 @@ def made_up_message(**overrides: Any) -> dict[str, Any]:
                 {"name": "MIME-Version", "value": "1.0"},
                 {"name": "From", "value": "Alice Example <alice@corp.example.org>"},
                 {"name": "Date", "value": "Thu, 29 Oct 2026 14:02:11 +0100"},
-                {"name": "Message-Id", "value": "<CAmade-up-1@mail.gmail.com>"},
+                {"name": "Message-Id", "value": "<CAmade-up-1@mail.example.net>"},
                 {"name": "References", "value": "<parent-0@corp.example.org> <p-1@x.example>"},
                 {"name": "In-Reply-To", "value": "<p-1@x.example>"},
                 {"name": "Subject", "value": "Lunch"},
-                {"name": "To", "value": "demo.inbox@gmail.com"},
+                {"name": "To", "value": "demo.inbox@example.net"},
                 {"name": "Content-Type", "value": 'multipart/mixed; boundary="000abc"'},
             ],
             "body": {"size": 0},
@@ -405,8 +405,8 @@ def test_a_thread_numbers_one_id_once_across_its_messages(recorder: ModuleType) 
     reply["payload"] = {
         **reply["payload"],
         "headers": [
-            {"name": "Message-ID", "value": "<CAmade-up-2@mail.gmail.com>"},
-            {"name": "In-Reply-To", "value": "<CAmade-up-1@mail.gmail.com>"},
+            {"name": "Message-ID", "value": "<CAmade-up-2@mail.example.net>"},
+            {"name": "In-Reply-To", "value": "<CAmade-up-1@mail.example.net>"},
         ],
     }
     url = "https://gmail.googleapis.com/gmail/v1/users/me/threads/18f0000000000007"
