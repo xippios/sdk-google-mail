@@ -15,7 +15,7 @@ the family rules every source shares are in `.claude/family.md`, which the next 
 | Documentation | Gmail's discovery document, https://gmail.googleapis.com/$discovery/rest?version=v1, which the REST reference https://developers.google.com/workspace/gmail/api/reference/rest names (`SPEC_URL` of `scripts/refresh_upstream.py`), kept as `docs/upstream/discovery.json` with its keys sorted; beside it, as Markdown under `docs/upstream/pages/`, the usage limits, the errors, the scopes, the Gmail Help article on search operators and Google's OAuth 2.0 overview and guides for desktop apps and web server applications (`/refresh-upstream`) |
 | Credentials | an OAuth 2.0 bearer renewed from a refresh token per account: the operator's Desktop-app client `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, the account list `GOOGLE_ACCOUNTS` and one `GOOGLE_<NAME>_REFRESH_TOKEN` per account (`demo` declared by `GOOGLE_DEMO_REFRESH_TOKEN` alone, never listed), from the environment, the registry `TENANTS` in `_client.py`; `RefreshTokenAuth` (`_auth.py`, queue row 252) exchanges the refresh token at `POST https://oauth2.googleapis.com/token`, keeps the access token, its expiry and the granted scopes in memory and sends the access token as a bearer, renewing it within 60 s of its expiry and once more on a 401; nothing is written to disk; a refresh token comes from `xippios-google-mail-auth` (`_consent.py`), for the scope set `read` (`gmail.readonly`) or `write` (`gmail.modify`); the nightly `live.yml` passes the client pair and demo's token as org secrets |
 | Rate limit | 60 requests per minute, burst 10, a self-imposed pace per account, enforced client-side in `_client.py` (`RATE_LIMIT`, one token bucket per account client); upstream documents a quota in units, 6,000 per minute per user per project and 1,200,000 per minute per project, with the units per method on the quota page, `docs/upstream/pages/quota.md` (`getProfile` 1; `messages.get` 20, 60 with `format=full`, its default; `threads.get` 40, 120 with `format=full`, its default), so 60 full `threads.get` in a minute (7,200 units) would exceed the per-user quota; the backstop is a `QuotaPolicy` per account (`account_config`, ADR-0010, ADR-0015; queue rows 143 and 299) that reads upstream's 403 `rateLimitExceeded` and `userRateLimitExceeded` (no quota header, no `Retry-After`, F8) and holds the account's requests back for 60 s, which `classify` maps to `RateLimitError` with `retry_after` 60 s, `dailyLimitExceeded` with 3,600 s |
-| Write tools | no, this package is read-only |
+| Write tools | yes: `create_draft`, `delete_draft`, `send_message`, `modify_message` and `trash_message` in `tasks_write.py`, served by the write server's entry point `xippios-google-mail-mcp-write` (`mcp_write.py`, registered with `read_only=False`, so core keeps `--http` on loopback without `--allow-remote`), never by the read server or the HTTP router; each takes `account` first and `confirm: bool = False` last, and without `confirm=True` sends nothing to the write endpoint and returns a preview; they need the account's `write` grant (`gmail.modify`) |
 
 The snapshot listed in `docs/upstream/FETCHED.md` is the reference for names, parameters and semantics.
 
@@ -33,25 +33,35 @@ src/xippios/google/mail/
   _tenants.py      Tenants and list_task, copied from sdk-cashctrl (queue row 281)
   _account_lock.py the --account lock, AccountLock and bind_tasks, copied from
                    sdk-cashctrl's _org_lock.py (queue row 281)
-  _cli.py          serve: --account through core's option hooks and the read server's
-                   loopback rule (ADR-0025 D-a; queue rows 281, 282)
+  _cli.py          serve: --account through core's option hooks, for both servers, and
+                   the read server's loopback rule (ADR-0025 D-a; queue rows 281, 282)
   _consent.py      xippios-google-mail-auth, the loopback PKCE consent that prints a
                    refresh token once
+  _compose.py      the RFC 2822 text a write task sends (EmailMessage, 7-bit, CRLF; no
+                   From), its base64url raw, the address and subject checks, a reply's
+                   headers from the original (Reply)
   errors.py        the package's own error classes, where conventions §5 calls for one
   models.py        pydantic models mirroring upstream payloads (UpstreamModel): the
-                   faithful read models (Label, ListMessagesResponse, Message with its
-                   MIME tree, Thread, ...) and the projections the tasks return
-                   (DecodedMessage and its Attachment, SearchRow)
+                   faithful models (Label, ListMessagesResponse, Message with its MIME
+                   tree, Thread, Draft, ModifyMessageRequest, ...), the projections the
+                   read tasks return (DecodedMessage and its Attachment, SearchRow) and
+                   the write tasks' previews (ComposePreview, ActionPreview) and
+                   DraftDeleted
   _decode.py       decode_message, the decoded view of a message's MIME tree (ADR-0025)
   api/             endpoint wrappers, one module per upstream operation, named by its
                    method id minus the shared gmail.users. (conventions §2): get_profile,
                    labels_list, messages_list, messages_get, threads_get and
-                   messages_attachments_get, the last without a task in 0.1.0
+                   messages_attachments_get, the last without a task in 0.1.0; the
+                   writes drafts_create, drafts_delete, messages_send, messages_modify
+                   and messages_trash
   tasks.py         task functions; __all__ is what the adapters register, but BULK_TASKS,
                    the Python-only ones; MCP_CAPS the per-tool result caps (the notes of
                    get_message and get_thread, the default bounds); SEARCH_MAX_RESULTS,
                    search_messages' bound
+  tasks_write.py   the write tasks, each previewing unless confirm=True; __all__ is what
+                   mcp_write.py registers, and the read server and the router none of it
   mcp.py           the read server's entry point, xippios-google-mail-mcp-read; build(lock)
+  mcp_write.py     the write server's entry point, xippios-google-mail-mcp-write; build(lock)
   http.py          FastAPI router
   params.py        the packaged reference lists, read from reference/
   enums.py         StrEnums (IntEnums for integer ids) generated from the packaged lists;
@@ -62,8 +72,9 @@ scripts/
   refresh_upstream.py    captures docs/upstream/ and writes FETCHED.md (/refresh-upstream): the
                          discovery document, its keys sorted, and seven pages as Markdown
   record_fixture.py      records one exchange of the demo account, or every exchange of
-                         a read task run for demo, into tests/fixtures/,
-                         scrubbed and checked before the one write (/record-fixture)
+                         a task run for demo, into tests/fixtures/, a write task under
+                         the write safety rule, scrubbed and checked before the one
+                         write (/record-fixture)
 tests/
   conftest.py      enables xippios.core.testing.plugin, which keeps the run offline,
                    strips every account but demo at import (queue row 281), and holds a
@@ -83,13 +94,19 @@ tests/
                    built from handle-errors.md's documented samples (the per-minute
                    and daily quota and domainPolicy, which demo cannot provoke)
   test_auth.py     RefreshTokenAuth: the refresh, the 401 retry, the refusals, no disk
-  test_account_lock.py  the --account lock and the loopback rule
+  test_account_lock.py  the --account lock on both servers and the two loopback rules
   test_consent.py  the consent tool, offline
   test_tasks_messages.py  the read tasks on labels, messages and threads: replays, MCP
                    calls, the search bound, the thread's slice and cut note, and the decoder's
                    rules on messages built in memory
-  test_record_fixture.py  the recorder's scrub step and check, offline
-  test_live.py     @pytest.mark.live smoke tests, one per task, against demo only
+  test_tasks_write.py  the write tasks: previews that send nothing, the refusals before
+                   any request, the composer, replays and MCP calls of the confirmed
+                   tools, the write server (assert_write_tools, copied from sdk-cashctrl,
+                   queue row 281) and the live tests' safety helper
+  test_record_fixture.py  the recorder's scrub step and check, and its write safety rule,
+                   offline
+  test_live.py     @pytest.mark.live smoke tests, one per task, against demo only; the
+                   write tasks in two sequences that write to demo itself and clean up
 docs/upstream/     documentation snapshot and FETCHED.md
 .github/workflows/ ci.yml (the required ci check, with the CHANGELOG and fixture-size steps),
                    publish.yml (the release train: tag, build, PyPI), live.yml (nightly live
@@ -112,12 +129,16 @@ XIPPIOS_LIVE_TESTS=1 direnv exec ~/github/sdk uv run pytest -m live --tb=short  
 
 uv run xippios-google-mail-mcp-read   # stdio; --http for streamable HTTP, on loopback
 uv run xippios-google-mail-mcp-read --account demo   # bound to one account
+uv run xippios-google-mail-mcp-write --account demo  # the write tools; --http on loopback
 
 xippios-google-mail-auth --account demo   # --scopes read by default; a consent: the operator's step
+xippios-google-mail-auth --account demo --scopes write   # gmail.modify, for the write tools
 
 direnv exec ~/github/sdk uv run scripts/record_fixture.py get_profile ok   # demo only
 direnv exec ~/github/sdk uv run scripts/record_fixture.py search_messages ok \
   q=newer_than:1y max_results=2   # through the task: ok.json, ok_2.json, ok_3.json
+direnv exec ~/github/sdk uv run scripts/record_fixture.py send_message ok \
+  'subject=xippios-live send' body=hi confirm=true   # a write task, to demo itself
 ```
 
 `.github/workflows/live.yml` runs the live tests nightly at 02:37 UTC, a time derived from
@@ -125,9 +146,13 @@ the slug. It passes the three org secrets `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SEC
 `GOOGLE_DEMO_REFRESH_TOKEN` by hand, since the template renders `_API_KEY` secrets only
 (queue row 255). Offline, core's plugin sets those three to its placeholder
 (`xippios_placeholder_key_envs` in `pyproject.toml`), and every Gmail fixture replays the
-refresh, `tests/fixtures/oauth2_token/ok.json`, before it. Demo's grant was consented with
-the read scopes on 2026-10-29 under a consent screen in Testing status, whose grants live
-seven days: a refresh answered `invalid_grant` means a new consent, by hand.
+refresh, `tests/fixtures/oauth2_token/ok.json`, before it, a write fixture
+`oauth2_token/write.json`, the refresh under the write grant. Demo's grant was consented
+with the read scopes on 2026-10-29 under a consent screen in Testing status, whose grants
+live seven days: a refresh answered `invalid_grant` means a new consent, by hand. The
+write tasks' fixtures and live tests need the write set, `gmail.modify`, which serves the
+reads too: demo is consented once more with `--scopes write`, by hand, its read grant
+revoked first, and `GOOGLE_DEMO_REFRESH_TOKEN` replaced.
 
 ## Gmail specifics
 
@@ -155,9 +180,10 @@ before the rule, `get_message/ok`, `get_thread/ok`, `search_messages/ok_2` and
 `search_messages/ok_3`, keep the sender name "Google"); every `body.data` decoded, its
 addresses scrubbed and encoded again, `size` as served; `attachmentId` to `att-<n>` in
 the body and the path; a profile-picture URL (`lh3.googleusercontent.com/a/...`, shown
-beside the account a security notice names) to `.../a/REDACTED`; `raw` dropped; message
-and thread ids kept, since replay matches the path. A read task's name records through
-the task, each Gmail exchange under the task's name (`ok.json`, then `ok_2.json`, ...).
+beside the account a security notice names) to `.../a/REDACTED`; `raw` dropped, from a
+write's JSON request body as from an answer; message and thread ids kept, since replay
+matches the path. A task's name, read or write, records through the task, each Gmail
+exchange under the task's name (`ok.json`, then `ok_2.json`, ...).
 Grep every fixture, its decoded `body.data` included, for those shapes and for addresses
 before committing it. detect-secrets reads a `body.data` as a Base64 High Entropy String
 (F18): a fixture that carries one needs an audited `.secrets.baseline` entry.
@@ -185,6 +211,35 @@ shown>` (conventions §8). `search_messages` reads at most 50 messages (`SEARCH_
 in the task for every caller, ADR-0001): a list and one `format=metadata` call per id, 5 +
 20 units each, 1,005 for 50. No task reports `meta.total`: Gmail's `resultSizeEstimate` is
 an estimate, kept as a data field of `list_messages` (ADR-0012).
+
+### The write tools and the write safety rule
+
+The five write tasks (`tasks_write.py`) take `account` first and `confirm: bool = False`
+last; without `confirm=True` (from Python anything else) a task sends nothing to the
+write endpoint and returns a preview: a `ComposePreview` (the message's To, Cc, Bcc,
+Subject, In-Reply-To and References as rendered, the body's first 10 lines and its line
+count, the `threadId`) or an `ActionPreview` (the id, the labels); a reply's preview reads
+the original's metadata once (20 units). Confirmed, a task returns upstream's answer:
+the `Draft`, the `Message` (ids and labels), or `DraftDeleted` for `drafts.delete`,
+which answers no body. `_compose` builds the RFC 2822 text with `EmailMessage` under
+`email.policy.SMTP` held to seven bits: no From (Gmail sets it, with Date and
+Message-ID), Bcc kept in the text (`messages.send` reads the recipients from To, Cc and
+Bcc), `raw` base64url without padding. A reply sets `threadId`, In-Reply-To (the
+original's Message-ID), References (its References and Message-ID) and, for an empty
+subject, `Re: <original>`, the discovery document's rule for joining a thread.
+`meta.request` holds the parameters and the `threadId`, never the `body` (ADR-0017).
+
+The write safety rule binds the recorder and the live tests: demo writes to itself only.
+Its own address comes from `users.getProfile` at runtime (1 unit), never from a file, a
+constant or a variable; a To, Cc or Bcc other than that address is refused before any
+write (`self_only` in the recorder, which takes no `to`, `cc` or `bcc` at all,
+`self_addressed` in the live tests); every message written carries `xippios-live` in its
+Subject, and the recorder modifies or trashes only a message whose Subject carries it. A
+live sequence sweeps marked leftovers first (`search_messages`, then
+`messages.trash`; drafts stay out, since no wrapper lists them by draft id), creates,
+reads back with `get_message`, then deletes the draft or trashes the message through the
+task, and in a `finally` through the wrapper. A write is irreversible even on the
+throwaway mailbox: nothing else is written.
 
 ### Accounts, scopes and errors
 
