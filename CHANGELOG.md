@@ -33,9 +33,9 @@ All notable changes to this project are documented here. The format follows
   renewed in memory before it expires and once more on a 401; nothing is written to disk.
   A revoked or expired refresh token is an `AuthError` that says how to consent again; a
   client the token endpoint refuses is a `ConfigError` naming the two client variables.
-- `xippios-google-mail-auth --account <name> --scopes read|write`, the consent tool: a
-  loopback redirect with PKCE that prints the account's refresh token once and stores
-  nothing.
+- `xippios-google-mail-auth --account <name> [--scopes read|write]`, the consent tool
+  (`read` by default): a loopback redirect with PKCE that prints the account's refresh
+  token once and stores nothing.
 - `list_accounts`, the declared accounts by name, and `get_profile(account)`, the
   account's address, message and thread counts and history id (`users.getProfile`).
 - `--account <name>` binds the read server to one account: every tool acts on it and
