@@ -116,7 +116,9 @@ message's labels (`google_mail_modify_message`) and move a message to the trash
 is called with `confirm=true`: a message's preview shows its To, Cc, Bcc, Subject,
 In-Reply-To and References and the body's first 10 lines, the others name the draft or
 the message and the labels. Confirmed, a tool returns Gmail's answer: the draft, or the
-message with its labels. A message is plain text in UTF-8, and Gmail sets From to the
+message with its labels; `google_mail_delete_draft`, which Gmail answers without a body,
+returns the package's acknowledgement, `{"performed": true, "id": "<the draft's id>"}`.
+A message is plain text in UTF-8, and Gmail sets From to the
 account's address; a reply (`in_reply_to_message_id`) joins the original's conversation
 and reads the original's headers first, its preview too. The write tools are no HTTP
 routes.

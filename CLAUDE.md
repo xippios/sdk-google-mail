@@ -243,9 +243,11 @@ throwaway mailbox: nothing else is written.
 ### Accounts, scopes and errors
 
 Every task takes `account` first; `list_accounts` names the declared accounts, names only.
-`--account <name>` binds the read server to one account (`_account_lock`), and `--http`
-serves it on a loopback `--host` only unless `--allow-remote` is passed (ADR-0025 D-a): it
-reaches every declared mailbox and carries no authentication. Upstream enforces a grant's
+`--account <name>` binds either server, the read or the write one, to one account
+(`_account_lock`, through `_cli.serve`). `--http` serves the read server on a loopback
+`--host` only unless `--allow-remote` is passed (ADR-0025 D-a), since it reaches every
+declared mailbox and carries no authentication, and core's `main` holds the write server
+to the same rule (ADR-0014, decision 9). Upstream enforces a grant's
 scopes: a call the grant does not cover is answered HTTP 403 `insufficientPermissions` with
 `WWW-Authenticate: Bearer error="insufficient_scope", scope="..."` (recorded 2026-10-29,
 F19; Gmail's error page says 401 `authError`), which `classify` maps to the `AuthError`

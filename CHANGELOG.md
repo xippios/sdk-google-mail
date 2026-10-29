@@ -82,7 +82,9 @@ All notable changes to this project are documented here. The format follows
   a message's labels (`users.messages.modify`); `trash_message` moves a message to the
   trash (`users.messages.trash`). Every one previews and changes nothing unless called
   with `confirm=True`: a message's headers and first lines, or the draft or message and
-  the labels; confirmed, it returns Gmail's answer. They need an account consented with
+  the labels; confirmed, it returns Gmail's answer, and `delete_draft`, which Gmail
+  answers without a body, an acknowledgement of its own, `{"performed": true, "id"}`.
+  They need an account consented with
   `--scopes write`, are re-exported from `xippios.google.mail` and are no HTTP routes;
   a result's request echo never carries the message's text.
 - The fixture recorder records the write tools under a safety rule: the demo account
