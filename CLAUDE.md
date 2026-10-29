@@ -147,12 +147,11 @@ the slug. It passes the three org secrets `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SEC
 (queue row 255). Offline, core's plugin sets those three to its placeholder
 (`xippios_placeholder_key_envs` in `pyproject.toml`), and every Gmail fixture replays the
 refresh, `tests/fixtures/oauth2_token/ok.json`, before it, a write fixture
-`oauth2_token/write.json`, the refresh under the write grant. Demo's grant was consented
-with the read scopes on 2026-10-29 under a consent screen in Testing status, whose grants
-live seven days: a refresh answered `invalid_grant` means a new consent, by hand. The
-write tasks' fixtures and live tests need the write set, `gmail.modify`, which serves the
-reads too: demo is consented once more with `--scopes write`, by hand, its read grant
-revoked first, and `GOOGLE_DEMO_REFRESH_TOKEN` replaced.
+`oauth2_token/write.json`, the refresh under the write grant. Demo holds the write set,
+`gmail.modify`, which serves the reads too and which the write tasks' fixtures and live
+tests need: consented with the read scopes on 2026-10-29 and, that grant revoked, with
+`--scopes write` the same day, under a consent screen in Testing status, whose grants
+live seven days: a refresh answered `invalid_grant` means a new consent, by hand.
 
 ## Gmail specifics
 
