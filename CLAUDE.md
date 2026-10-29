@@ -48,8 +48,9 @@ src/xippios/google/mail/
                    labels_list, messages_list, messages_get, threads_get and
                    messages_attachments_get, the last without a task in 0.1.0
   tasks.py         task functions; __all__ is what the adapters register, but BULK_TASKS,
-                   the Python-only ones; MCP_CAPS the per-tool result caps (get_thread's
-                   note); SEARCH_MAX_RESULTS, search_messages' bound
+                   the Python-only ones; MCP_CAPS the per-tool result caps (the notes of
+                   get_message and get_thread, the default bounds); SEARCH_MAX_RESULTS,
+                   search_messages' bound
   mcp.py           the read server's entry point, xippios-google-mail-mcp-read; build(lock)
   http.py          FastAPI router
   params.py        the packaged reference lists, read from reference/
@@ -170,7 +171,10 @@ is no attachment, `html` the first `text/html` one, on request only (`include_ht
 a body is base64url decoded and read in its `Content-Type` charset, else UTF-8, with
 U+FFFD for what that cannot read. A part with a `filename` or a `body.attachmentId` is an
 attachment: `attachments` lists its `part_id`, `filename`, `mime_type`, `size` and
-`attachment_id`, never its content, and the walk does not descend into it. `get_thread`
+`attachment_id`, never its content, and the walk does not descend into it. Over the result cap a
+message, no list, comes back as the result's first 64 KB and a note of the tool's own
+(`MCP_CAPS["get_message"]`): its text or html is cut, `include_html=False` gives the text
+alone, and no `start` resumes it (ADR-0025, ADR-0016). `get_thread`
 returns the views of a thread's messages, text only, from `start`, at most `limit`, and
 records `start` in `meta.request`, so core's cut note ends `; resume with start=<start +
 shown>` (conventions §8). `search_messages` reads at most 50 messages (`SEARCH_MAX_RESULTS`,

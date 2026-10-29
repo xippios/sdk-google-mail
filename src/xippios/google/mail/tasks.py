@@ -59,6 +59,17 @@ __all__ = [
 BULK_TASKS: frozenset[str] = frozenset()
 
 MCP_CAPS: Mapping[str, ResultCap] = {
+    # A message is no list: over the default 64 KB core returns the result's first 64 KB
+    # as a preview after "result is <n> bytes, over the cap of 65536; " and this note,
+    # which says what was cut and what the agent can do; no start resumes it (ADR-0016;
+    # ADR-0025, "Over the cap a long text or html comes back as a preview plus the note").
+    "get_message": ResultCap(
+        note=(
+            "the preview is the first 64 KB of the result, so a long message's text or html "
+            "is cut; call with include_html=False for the text alone, or read the message "
+            "in a mail client; there is no start to resume with"
+        )
+    ),
     # A thread's messages can pass the default 64 KB; the note names the two parameters
     # that page through it, and core's cut ends "; resume with start=<start + shown>"
     # from meta.request's start (conventions §8, ADR-0016 and its amendment).

@@ -412,12 +412,41 @@ async def test_get_thread_over_mcp(replay_fixture: ReplayFixture) -> None:
     assert "note" not in payload, "one message fits the cap"
 
 
-def test_mcp_caps_name_get_thread_alone() -> None:
-    assert set(tasks.MCP_CAPS) == {"get_thread"}
-    cap = tasks.MCP_CAPS["get_thread"]
-    assert (cap.max_rows, cap.max_bytes) == (ResultCap().max_rows, ResultCap().max_bytes)
-    assert cap.note is not None
-    assert "start and limit" in cap.note
+def test_mcp_caps_name_get_message_and_get_thread_alone() -> None:
+    assert set(tasks.MCP_CAPS) == {"get_message", "get_thread"}
+    for cap in tasks.MCP_CAPS.values():
+        assert (cap.max_rows, cap.max_bytes) == (ResultCap().max_rows, ResultCap().max_bytes)
+    assert "start and limit" in (tasks.MCP_CAPS["get_thread"].note or "")
+
+
+def test_a_long_message_comes_back_as_a_preview_and_the_note(
+    replay_fixture: ReplayFixture,
+) -> None:
+    """ADR-0025: over the cap a long text or html is a preview plus the note (ADR-0016).
+
+    The recorded message is short, so its text is made 40 times as long in memory; the
+    cap and its note are the tool's own, from ``MCP_CAPS``.
+    """
+    replay_fixture("oauth2_token", "ok")
+    replay_fixture("get_message", "ok")
+    result = tasks.get_message(DEMO, answer("get_message", "ok")["id"])
+    long = result.model_copy(
+        update={"data": result.data.model_copy(update={"text": (result.data.text or "") * 40})}
+    )
+    compact = json.dumps(long.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":"))
+    size = len(compact.encode())  # as core counts it: the compact JSON's UTF-8 bytes
+    assert size > ResultCap().max_bytes
+    capped = json.loads(cap_result(long, tasks.MCP_CAPS["get_message"]))
+    assert set(capped) == {"note", "preview"}
+    assert capped["note"] == (
+        f"result is {size} bytes, over the cap of 65536; the preview is the first 64 KB of "
+        "the result, so a long message's text or html is cut; call with include_html=False "
+        "for the text alone, or read the message in a mail client; there is no start to "
+        "resume with"
+    )
+    assert "resume with start" not in capped["note"]
+    assert capped["preview"].startswith('{"data":{"id":')
+    assert len(capped["preview"].encode()) <= ResultCap().max_bytes
 
 
 # the decoder, on messages built in memory --------------------------------------------

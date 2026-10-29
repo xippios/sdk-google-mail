@@ -58,7 +58,8 @@ All notable changes to this project are documented here. The format follows
   `get_message`, one message's decoded view (`users.messages.get`, `format=full`): its
   From, To, Cc, Bcc, Date, Subject, Message-ID, In-Reply-To and References headers, the
   first plain-text part decoded in its charset, the first HTML part on request
-  (`include_html`), and its attachments' metadata, never their content; and
+  (`include_html`), and its attachments' metadata, never their content, a message over
+  the MCP result cap coming back as its first 64 KB with a note saying so; and
   `get_thread`, the views of a thread's messages as text (`users.threads.get`,
   `format=full`), from `start` and at most `limit`, a cut answer ending with where to
   resume.
