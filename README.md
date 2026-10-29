@@ -27,8 +27,9 @@ prints the authorization URL to open in a browser signed in to the account, and 
 refresh token once, to stdout; it stores nothing:
 
 ```bash
-xippios-google-mail-auth --account work                  # --scopes read: gmail.readonly
-xippios-google-mail-auth --account work --scopes write   # gmail.modify, every read too
+uvx --from xippios-google-mail xippios-google-mail-auth --account work                 # --scopes read: gmail.readonly
+uvx --from xippios-google-mail xippios-google-mail-auth --account work --scopes write  # gmail.modify, every read too
+xippios-google-mail-auth --account work   # the same, where xippios-google-mail is installed
 ```
 
 ## 30-second example
@@ -67,7 +68,7 @@ sent = tasks_write.send_message(
 sent.data.id, sent.data.label_ids  # upstream's answer: ["SENT"], ...
 ```
 
-Task functions are listed in the status table below as they are added.
+The read and write tasks are listed in the status table below.
 
 ## MCP
 
@@ -76,11 +77,22 @@ Task functions are listed in the status table below as they are added.
   "mcpServers": {
     "google-mail": {
       "command": "uvx",
-      "args": ["--from", "xippios-google-mail[mcp]", "xippios-google-mail-mcp-read"]
+      "args": ["--from", "xippios-google-mail[mcp]", "xippios-google-mail-mcp-read"],
+      "env": {
+        "GOOGLE_CLIENT_ID": "<client id>.apps.googleusercontent.com",
+        "GOOGLE_CLIENT_SECRET": "<client secret>",
+        "GOOGLE_ACCOUNTS": "work,private",
+        "GOOGLE_WORK_REFRESH_TOKEN": "<refresh token>",
+        "GOOGLE_PRIVATE_REFRESH_TOKEN": "<refresh token>"
+      }
     }
   }
 }
 ```
+
+The refresh tokens come from the consent tool above, one per account; a deployment that
+serves one account can pass `--account work` in `args` and declare that account alone
+(`"GOOGLE_ACCOUNTS": "work"` and its token) instead of listing several.
 
 The read server's tools are read-only and named `google_mail_<verb>_<noun>`. Results are capped, at
 200 rows or 64 KB unless a tool has a cap of its own, with a note on how to see the rest.
@@ -103,11 +115,21 @@ a loopback `--host` over `--http` unless `--allow-remote` is passed:
   "mcpServers": {
     "google-mail-write": {
       "command": "uvx",
-      "args": ["--from", "xippios-google-mail[mcp]", "xippios-google-mail-mcp-write"]
+      "args": ["--from", "xippios-google-mail[mcp]", "xippios-google-mail-mcp-write"],
+      "env": {
+        "GOOGLE_CLIENT_ID": "<client id>.apps.googleusercontent.com",
+        "GOOGLE_CLIENT_SECRET": "<client secret>",
+        "GOOGLE_ACCOUNTS": "work,private",
+        "GOOGLE_WORK_REFRESH_TOKEN": "<refresh token>",
+        "GOOGLE_PRIVATE_REFRESH_TOKEN": "<refresh token>"
+      }
     }
   }
 }
 ```
+
+Its refresh tokens come from `xippios-google-mail-auth --scopes write`; a deployment that
+only reads keeps the default `read` grant, which cannot change a mailbox.
 
 Five write tools store a draft (`google_mail_create_draft`), delete one
 (`google_mail_delete_draft`), send a message (`google_mail_send_message`), change a
@@ -129,7 +151,7 @@ routes.
 heading and the "Task function" column. Each row's Task function cell starts with the
 task's name in backticks, alone or as its call (`get_data(code, year)`); several tasks in
 one row are backticked names separated by commas; prose may follow. The tables list
-exactly tasks.__all__. -->
+exactly tasks.__all__ and tasks_write.__all__. -->
 
 | Upstream operation | Task function | MCP tool | Status |
 | --- | --- | --- | --- |

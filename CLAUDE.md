@@ -14,7 +14,7 @@ the family rules every source shares are in `.claude/family.md`, which the next 
 | API base URL | `https://gmail.googleapis.com/gmail/v1/users/me` |
 | Documentation | Gmail's discovery document, https://gmail.googleapis.com/$discovery/rest?version=v1, which the REST reference https://developers.google.com/workspace/gmail/api/reference/rest names (`SPEC_URL` of `scripts/refresh_upstream.py`), kept as `docs/upstream/discovery.json` with its keys sorted; beside it, as Markdown under `docs/upstream/pages/`, the usage limits, the errors, the scopes, the Gmail Help article on search operators and Google's OAuth 2.0 overview and guides for desktop apps and web server applications (`/refresh-upstream`) |
 | Credentials | an OAuth 2.0 bearer renewed from a refresh token per account: the operator's Desktop-app client `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, the account list `GOOGLE_ACCOUNTS` and one `GOOGLE_<NAME>_REFRESH_TOKEN` per account (`demo` declared by `GOOGLE_DEMO_REFRESH_TOKEN` alone, never listed), from the environment, the registry `TENANTS` in `_client.py`; `RefreshTokenAuth` (`_auth.py`, queue row 252) exchanges the refresh token at `POST https://oauth2.googleapis.com/token`, keeps the access token, its expiry and the granted scopes in memory and sends the access token as a bearer, renewing it within 60 s of its expiry and once more on a 401; nothing is written to disk; a refresh token comes from `xippios-google-mail-auth` (`_consent.py`), for the scope set `read` (`gmail.readonly`) or `write` (`gmail.modify`); the nightly `live.yml` passes the client pair and demo's token as org secrets |
-| Rate limit | 60 requests per minute, burst 10, a self-imposed pace per account, enforced client-side in `_client.py` (`RATE_LIMIT`, one token bucket per account client); upstream documents a quota in units, 6,000 per minute per user per project and 1,200,000 per minute per project, with the units per method on the quota page, `docs/upstream/pages/quota.md` (`getProfile` 1; `messages.get` 20, 60 with `format=full`, its default; `threads.get` 40, 120 with `format=full`, its default), so 60 full `threads.get` in a minute (7,200 units) would exceed the per-user quota; the backstop is a `QuotaPolicy` per account (`account_config`, ADR-0010, ADR-0015; queue rows 143 and 299) that reads upstream's 403 `rateLimitExceeded` and `userRateLimitExceeded` (no quota header, no `Retry-After`, F8) and holds the account's requests back for 60 s, which `classify` maps to `RateLimitError` with `retry_after` 60 s, `dailyLimitExceeded` with 3,600 s |
+| Rate limit | 60 requests per minute, burst 10, a self-imposed pace per account, enforced client-side in `_client.py` (`RATE_LIMIT`, one token bucket per account client); upstream documents a quota in units, 6,000 per minute per user per project and 1,200,000 per minute per project, with the units per method on the quota page, `docs/upstream/pages/quota.md` (`getProfile` 1; `messages.get` 20, 60 with `format=full`, its default; `threads.get` 40, 120 with `format=full`, its default), so 60 full `threads.get` in a minute (7,200 units) would exceed the per-user quota; the backstop is a `QuotaPolicy` per account (`account_config`, ADR-0010, ADR-0015; queue rows 143 and 299) that reads upstream's 403 `rateLimitExceeded` and `userRateLimitExceeded` (Gmail documents no quota header and no `Retry-After`) and holds the account's requests back for 60 s, which `classify` maps to `RateLimitError` with `retry_after` 60 s, `dailyLimitExceeded` with 3,600 s |
 | Write tools | yes: `create_draft`, `delete_draft`, `send_message`, `modify_message` and `trash_message` in `tasks_write.py`, served by the write server's entry point `xippios-google-mail-mcp-write` (`mcp_write.py`, registered with `read_only=False`, so core keeps `--http` on loopback without `--allow-remote`), never by the read server or the HTTP router; each takes `account` first and `confirm: bool = False` last, and without `confirm=True` sends nothing to the write endpoint and returns a preview; they need the account's `write` grant (`gmail.modify`) |
 
 The snapshot listed in `docs/upstream/FETCHED.md` is the reference for names, parameters and semantics.
@@ -168,9 +168,10 @@ hand: `scripts/record_fixture.py` records through `client_for("demo")` only, wit
 then its own step (encoded forms, token fields by key, every address to
 `user@example.com`), and checks for Google's token shapes (`ya29.`, `1//`, `GOCSPX-`,
 `apps.googleusercontent.com`) before the one write. A message or thread answer is read as
-JSON first (`MessageScrub`, the investigation's §2.7 list): every part's headers cut to
-From, To, Cc, Bcc, Date, Subject, Message-ID, In-Reply-To, References, Content-Type and
-MIME-Version, so `Received`, `ARC-*`, `DKIM-Signature` and `X-Google-*` go; each id of a
+JSON first (`MessageScrub`, the list of the Gmail investigation that ADR-0025 rests on):
+every part's headers cut to From, To, Cc, Bcc, Date, Subject, Message-ID, In-Reply-To,
+References, Content-Type and MIME-Version, so `Received`, `ARC-*`, `DKIM-Signature` and
+`X-Google-*` go; each id of a
 Message-ID, In-Reply-To or References value numbered `<n@example.com>` within the
 fixture; in From, To, Cc, Bcc, Reply-To and Sender, on every part, each `Name <addr>` or
 `"Name" <addr>` made `User <user@example.com>`, a bare address `user@example.com`, since
@@ -184,8 +185,8 @@ write's JSON request body as from an answer; message and thread ids kept, since 
 matches the path. A task's name, read or write, records through the task, each Gmail
 exchange under the task's name (`ok.json`, then `ok_2.json`, ...).
 Grep every fixture, its decoded `body.data` included, for those shapes and for addresses
-before committing it. detect-secrets reads a `body.data` as a Base64 High Entropy String
-(F18): a fixture that carries one needs an audited `.secrets.baseline` entry.
+before committing it. detect-secrets reads a `body.data` as a Base64 High Entropy String:
+a fixture that carries one needs an audited `.secrets.baseline` entry.
 
 ### The decoded view
 
@@ -249,8 +250,8 @@ Every task takes `account` first; `list_accounts` names the declared accounts, n
 declared mailbox and carries no authentication, and core's `main` holds the write server
 to the same rule (ADR-0014, decision 9). Upstream enforces a grant's
 scopes: a call the grant does not cover is answered HTTP 403 `insufficientPermissions` with
-`WWW-Authenticate: Bearer error="insufficient_scope", scope="..."` (recorded 2026-10-29,
-F19; Gmail's error page says 401 `authError`), which `classify` maps to the `AuthError`
+`WWW-Authenticate: Bearer error="insufficient_scope", scope="..."` (recorded 2026-10-29;
+Gmail's error page says 401 `authError`), which `classify` maps to the `AuthError`
 naming the granted scopes and the re-run with `--scopes write`. The token endpoint's 400
 `invalid_grant` is the `AuthError` that names the re-run of `xippios-google-mail-auth`, its
 401 `invalid_client` a `ConfigError` naming the client variables.

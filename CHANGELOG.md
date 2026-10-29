@@ -6,15 +6,34 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-29
+
+First release, on xippios-core 0.3.0 from PyPI (`~=0.3.0`), sdk-template v0.3.0 and the
+family's conventions 1.23. It wraps the Gmail API for several Gmail accounts at once. The
+environment names the operator's Desktop-app OAuth client (`GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`), the accounts (`GOOGLE_ACCOUNTS`) and one refresh token per
+account (`GOOGLE_<NAME>_REFRESH_TOKEN`); the client renews each account's access token
+in memory and writes nothing to disk, and the consent tool `xippios-google-mail-auth`
+gets an account's refresh token, for reading (`gmail.readonly`) or for writing as well
+(`gmail.modify`). Seven read tasks name the accounts and read an account's profile, its
+labels, a page of message ids, the messages a search finds, one message's decoded view
+and a thread's; they are the tools of the read server, `xippios-google-mail-mcp-read`,
+and routes of the FastAPI router. Five write tasks store and delete a draft, send a
+message, change a message's labels and move a message to the trash; each previews and
+changes nothing unless it is called with `confirm=True`, and they are the tools of a
+server of their own, `xippios-google-mail-mcp-write`, never routes. Either server runs on
+stdio by default and, over `--http`, serves streamable HTTP on a loopback host only unless
+`--allow-remote` is passed, since neither carries authentication. The client keeps a
+self-imposed pace of 60 requests a minute per account. The documentation snapshot of
+2026-10-29 under `docs/upstream/`, Gmail's discovery document among it, is the reference
+for names and semantics.
+
 ### Added
 
 - Scaffold from [sdk-template](https://github.com/xippios/sdk-template): configured
   client for Gmail, empty task layer, MCP server and FastAPI router
   wired to it, test harness with core's family check, CI, the nightly live tests and
   the release train, in which a release PR's merge tags and publishes.
-- The read server's entry point is `xippios-google-mail-mcp-read`, since a write
-  server with an entry point of its own follows in this release (decision of
-  2026-10-29).
 - The documentation snapshot in `docs/upstream/`, captured on 2026-10-29 by
   `scripts/refresh_upstream.py`: Gmail's discovery document (revision 20261026, kept
   with its keys sorted), the API's usage limits, errors and scopes, the Gmail Help
@@ -36,19 +55,13 @@ All notable changes to this project are documented here. The format follows
 - `xippios-google-mail-auth --account <name> [--scopes read|write]`, the consent tool
   (`read` by default): a loopback redirect with PKCE that prints the account's refresh
   token once and stores nothing.
-- `list_accounts`, the declared accounts by name, and `get_profile(account)`, the
-  account's address, message and thread counts and history id (`users.getProfile`).
-- `--account <name>` binds the read server to one account: every tool acts on it and
-  takes no `account`.
-- The read server is served over `--http` on a loopback `--host` only, unless
-  `--allow-remote` is passed: it reaches every declared mailbox and carries no
-  authentication.
 - Gmail's error answers mapped: a spent per-minute or daily quota is a `RateLimitError`
   (60 s, 3,600 s), a grant without the scope a call needs an `AuthError` naming the
   scopes granted and the consent to re-run, a domain policy or a refused access token an
   `AuthError`; each account's requests are paced at 60 a minute and held back for a
   minute after a spent quota.
-
+- `list_accounts`, the declared accounts by name, and `get_profile(account)`, the
+  account's address, message and thread counts and history id (`users.getProfile`).
 - The read tasks on a mailbox, each with the account first: `list_labels`, the labels
   whose ids `label_ids` takes (`users.labels.list`); `list_messages`, one page of message
   and thread ids for a query in Gmail's own search syntax, sent verbatim, or for labels,
@@ -66,12 +79,13 @@ All notable changes to this project are documented here. The format follows
 - Endpoint wrappers for `users.labels.list`, `users.messages.list`, `users.messages.get`,
   `users.threads.get` and `users.messages.attachments.get`, the last without a task, and
   faithful models of their answers, the whole MIME tree of a message among them.
-- The fixture recorder records through a read task and scrubs a message or thread answer
-  as JSON before it writes: headers cut to an allowlist on every part, Message-ID,
-  In-Reply-To and References numbered `<n@example.com>`, display names in the address
-  headers replaced by `User`, every body decoded, its addresses replaced and encoded
-  again, attachment ids numbered, a profile-picture URL redacted and the raw message
-  never kept; its final check reads the decoded bodies too.
+- The read server's entry point is `xippios-google-mail-mcp-read`, as the family names
+  the servers of a source with a write server; the write server has an entry point of
+  its own. It is served over `--http` on a loopback `--host` only, unless
+  `--allow-remote` is passed: it reaches every declared mailbox and carries no
+  authentication.
+- `--account <name>` binds either server, the read or the write one, to one account:
+  every tool acts on it and takes no `account`.
 - The write tools, on a server of their own, `xippios-google-mail-mcp-write`, which
   takes `--account` too and is served over `--http` on a loopback `--host` only unless
   `--allow-remote` is passed: `create_draft` and `send_message` build a plain-text
@@ -84,9 +98,15 @@ All notable changes to this project are documented here. The format follows
   with `confirm=True`: a message's headers and first lines, or the draft or message and
   the labels; confirmed, it returns Gmail's answer, and `delete_draft`, which Gmail
   answers without a body, an acknowledgement of its own, `{"performed": true, "id"}`.
-  They need an account consented with
-  `--scopes write`, are re-exported from `xippios.google.mail` and are no HTTP routes;
-  a result's request echo never carries the message's text.
+  They need an account consented with `--scopes write`, are re-exported from
+  `xippios.google.mail` and are no HTTP routes; a result's request echo never carries
+  the message's text.
+- The fixture recorder records through a read task and scrubs a message or thread answer
+  as JSON before it writes: headers cut to an allowlist on every part, Message-ID,
+  In-Reply-To and References numbered `<n@example.com>`, display names in the address
+  headers replaced by `User`, every body decoded, its addresses replaced and encoded
+  again, attachment ids numbered, a profile-picture URL redacted and the raw message
+  never kept; its final check reads the decoded bodies too.
 - The fixture recorder records the write tools under a safety rule: the demo account
   writes to its own address only, read from its profile when it records, every message
   it writes carries `xippios-live` in its subject, and the raw message a write sends is
