@@ -67,7 +67,7 @@ sent = tasks_write.send_message(
 sent.data.id, sent.data.label_ids  # upstream's answer: ["SENT"], ...
 ```
 
-Task functions are listed in the status table below as they are added.
+The read and write tasks are listed in the status table below.
 
 ## MCP
 
@@ -129,7 +129,7 @@ routes.
 heading and the "Task function" column. Each row's Task function cell starts with the
 task's name in backticks, alone or as its call (`get_data(code, year)`); several tasks in
 one row are backticked names separated by commas; prose may follow. The tables list
-exactly tasks.__all__. -->
+exactly tasks.__all__ and tasks_write.__all__. -->
 
 | Upstream operation | Task function | MCP tool | Status |
 | --- | --- | --- | --- |
