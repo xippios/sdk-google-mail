@@ -14,20 +14,31 @@ uv add "xippios-google-mail[mcp]"     # + MCP server
 uv add "xippios-google-mail[http]"    # + FastAPI router
 ```
 
-From PR 3 on, the API takes an OAuth 2.0 bearer token, renewed from a refresh token per
-Gmail account. The environment names the operator's Desktop-app OAuth client,
-`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, the accounts, `GOOGLE_ACCOUNTS`
-(`work,private`), and one `GOOGLE_<NAME>_REFRESH_TOKEN` per account (the test account
-`demo` is declared by `GOOGLE_DEMO_REFRESH_TOKEN` alone). A refresh token comes from the
-consent tool `xippios-google-mail-auth`.
+The API takes an OAuth 2.0 bearer token, which the package renews in memory from a
+refresh token per Gmail account and never writes to disk. The environment names the
+operator's Desktop-app OAuth client, `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, the
+accounts, `GOOGLE_ACCOUNTS` (`work,private`), and one `GOOGLE_<NAME>_REFRESH_TOKEN` per
+account (the test account `demo` is declared by `GOOGLE_DEMO_REFRESH_TOKEN` alone and
+never listed). Every task takes the account's name first; `list_accounts` names the
+declared ones.
+
+A refresh token comes from the consent tool, which listens on `http://127.0.0.1:<port>/`,
+prints the authorization URL to open in a browser signed in to the account, and prints the
+refresh token once, to stdout; it stores nothing:
+
+```bash
+xippios-google-mail-auth --account work --scopes read    # gmail.readonly
+xippios-google-mail-auth --account work --scopes write   # gmail.modify, every read too
+```
 
 ## 30-second example
 
 ```python
 from xippios.google.mail import tasks
 
-# result = tasks.<task>(...)
-# result.data, result.meta.retrieved_at, result.meta.request
+tasks.list_accounts().data  # ["work", "private"]
+result = tasks.get_profile("work")
+result.data.messages_total, result.meta.tenant, result.meta.retrieved_at
 ```
 
 Task functions are listed in the status table below as they are added.
@@ -47,7 +58,10 @@ Task functions are listed in the status table below as they are added.
 
 Tools are read-only and named `google_mail_<verb>_<noun>`. Results are capped, at
 200 rows or 64 KB unless a tool has a cap of its own, with a note on how to see the rest.
-`--http` serves streamable HTTP instead of stdio.
+`--account <name>` binds the server to one account: every tool acts on it and takes no
+`account`. `--http` serves streamable HTTP instead of stdio, on a loopback `--host` only
+(`127.0.0.1`, `localhost`, `::1`): the server reaches every declared mailbox and carries no
+authentication, so serving it beyond loopback takes `--allow-remote` and a gateway in front.
 
 ## Status
 
