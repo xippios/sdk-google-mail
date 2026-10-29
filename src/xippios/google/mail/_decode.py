@@ -55,7 +55,6 @@ HEADERS = (
 )
 """The headers a decoded view keeps (ADR-0025), compared without regard to case."""
 _KEPT = frozenset(name.lower() for name in HEADERS)
-_ENDPOINT = "gmail.users.messages.get"
 
 
 def header_value(headers: list[MessagePartHeader], name: str) -> str | None:
@@ -112,7 +111,9 @@ def _walk(part: MessagePart) -> Iterator[MessagePart]:
         yield from _walk(child)
 
 
-def _text_of(parts: list[MessagePart], mime_type: str, message_id: str) -> str | None:
+def _text_of(
+    parts: list[MessagePart], mime_type: str, message_id: str, endpoint: str
+) -> str | None:
     """The decoded body of the first part of ``mime_type`` that is no attachment."""
     for part in parts:
         if (part.mime_type or "").lower() != mime_type or _is_attachment(part):
@@ -124,7 +125,7 @@ def _text_of(parts: list[MessagePart], mime_type: str, message_id: str) -> str |
             return decode_body(data, _charset(part))
         except binascii.Error:
             raise ValidationError(
-                f"{SOURCE} {_ENDPOINT}: message {message_id}, part {part.part_id!r}: "
+                f"{SOURCE} {endpoint}: message {message_id}, part {part.part_id!r}: "
                 "body.data is not base64url",
                 raw=data,
                 source=SOURCE,
@@ -132,11 +133,15 @@ def _text_of(parts: list[MessagePart], mime_type: str, message_id: str) -> str |
     return None
 
 
-def decode_message(message: Message, *, include_html: bool = False) -> DecodedMessage:
+def decode_message(
+    message: Message, *, endpoint: str, include_html: bool = False
+) -> DecodedMessage:
     """The decoded view of ``message``, one fetched with ``format=full`` (module docstring).
 
     Args:
         message: The message, its ``payload`` the whole MIME tree.
+        endpoint: The operation the message came from, which an error names, e.g.
+            ``"gmail.users.messages.get"`` or ``"gmail.users.threads.get"``.
         include_html: Decode the first ``text/html`` part into ``html`` as well; ``False``
             leaves ``html`` ``None``.
 
@@ -161,7 +166,7 @@ def decode_message(message: Message, *, include_html: bool = False) -> DecodedMe
     return DecodedMessage.project(
         message,
         headers=headers,
-        text=_text_of(parts, "text/plain", message.id),
-        html=_text_of(parts, "text/html", message.id) if include_html else None,
+        text=_text_of(parts, "text/plain", message.id, endpoint),
+        html=_text_of(parts, "text/html", message.id, endpoint) if include_html else None,
         attachments=attachments,
     )

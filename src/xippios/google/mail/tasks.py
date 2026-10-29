@@ -286,7 +286,7 @@ async def get_message_async(
     message = await api.messages_get(client_for(account), message_id, format="full")
     sent = {"id": message_id, "format": "full", "include_html": include_html}
     return Result(
-        data=decode_message(message, include_html=include_html),
+        data=decode_message(message, endpoint=MESSAGES_GET, include_html=include_html),
         meta=_meta(account, MESSAGES_GET, sent),
     )
 
@@ -326,7 +326,9 @@ async def get_thread_async(
         )
     thread = await api.threads_get(client_for(account), thread_id, format="full")
     end = None if limit is None else start + limit
-    views = [decode_message(message) for message in thread.messages[start:end]]
+    views = [
+        decode_message(message, endpoint=THREADS_GET) for message in thread.messages[start:end]
+    ]
     sent = {"id": thread_id, "format": "full", "start": start, "limit": limit}
     return Result(data=views, meta=_meta(account, THREADS_GET, sent))
 

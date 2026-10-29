@@ -50,6 +50,7 @@ from xippios.google.mail.models import (
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 BASE = "https://gmail.googleapis.com/gmail/v1/users/me"
+GET, THREAD = "gmail.users.messages.get", "gmail.users.threads.get"
 KEPT = {name.lower() for name in HEADERS}
 
 
@@ -345,7 +346,7 @@ def test_get_thread_returns_each_message_s_view_as_text(replay_fixture: ReplayFi
     result = tasks.get_thread(DEMO, thread["id"])
     assert [view.id for view in result.data] == [m["id"] for m in thread["messages"]]
     for view, message in zip(result.data, thread["messages"], strict=True):
-        assert view == decode_message(Message.model_validate(message))
+        assert view == decode_message(Message.model_validate(message), endpoint=THREAD)
         assert view.text == part_text(message, "text/plain")
         assert view.html is None, "a thread's views carry text only"
     assert_meta(
@@ -537,7 +538,7 @@ def test_the_decoder_walks_the_tree_by_role() -> None:
             ],
         }
     )
-    view = decode_message(message, include_html=True)
+    view = decode_message(message, endpoint=GET, include_html=True)
     assert [(h.name, h.value) for h in view.headers] == [
         ("subject", "Lunch"),
         ("From", "Alice <alice@example.com>"),
@@ -550,26 +551,32 @@ def test_the_decoder_walks_the_tree_by_role() -> None:
         ("1", "notes.txt", "text/plain", 12, "att-1"),
         ("2", "fwd.eml", "message/rfc822", 99, "att-2"),
     ], "metadata only; an attached message is not descended into"
-    assert decode_message(message).html is None
+    assert decode_message(message, endpoint=GET).html is None
 
 
 def test_the_decoder_s_edges() -> None:
-    assert decode_message(made_up(leaf("", "text/html", b64url("<b>x</b>")))).text is None
-    assert decode_message(made_up(leaf("", "text/plain"))).text == "", "an empty body"
+    html_only = made_up(leaf("", "text/html", b64url("<b>x</b>")))
+    assert decode_message(html_only, endpoint=GET).text is None
+    empty = made_up(leaf("", "text/plain"))
+    assert decode_message(empty, endpoint=GET).text == "", "an empty body"
     unknown = leaf(
         "",
         "text/plain",
         b64url("café"),
         headers=[{"name": "Content-Type", "value": "text/plain; charset=x-unknown"}],
     )
-    assert decode_message(made_up(unknown)).text == "café", "an unknown charset reads as UTF-8"
+    assert decode_message(made_up(unknown), endpoint=GET).text == "café", (
+        "an unknown charset reads as UTF-8"
+    )
     broken = leaf("", "text/plain", b64url("abc", "utf-16"))
-    assert "�" in (decode_message(made_up(broken)).text or ""), "bytes UTF-8 cannot read"
-    with pytest.raises(ValidationError, match=r"part '': body.data is not base64url"):
-        decode_message(made_up(leaf("", "text/plain", "abcde")))
+    assert "�" in (decode_message(made_up(broken), endpoint=GET).text or ""), (
+        "bytes UTF-8 cannot read"
+    )
+    with pytest.raises(ValidationError, match=r"messages.get: message m1, part '': body.data is"):
+        decode_message(made_up(leaf("", "text/plain", "abcde")), endpoint=GET)
     no_payload = Message.model_validate({"id": "m1"})
-    assert decode_message(no_payload).headers == []
-    assert decode_message(no_payload).text is None
+    assert decode_message(no_payload, endpoint=GET).headers == []
+    assert decode_message(no_payload, endpoint=GET).text is None
 
 
 # messages_attachments_get, the wrapper without a task --------------------------------
@@ -594,3 +601,9 @@ def test_every_read_task_has_a_sync_twin() -> None:
         twin = getattr(tasks, f"{name}_async")
         assert getattr(tasks, name).async_fn is twin
         assert sync(twin).__name__ == name
+
+
+def test_a_decode_error_names_the_operation_the_message_came_from() -> None:
+    broken = made_up(leaf("", "text/plain", "abcde"))
+    with pytest.raises(ValidationError, match=r"^google-mail gmail.users.threads.get: message m1"):
+        decode_message(broken, endpoint=THREAD)
