@@ -745,6 +745,32 @@ def test_only_a_marked_message_is_trashed(
     assert (tmp_path / "fixtures" / "trash_message").exists() == (status == 0)
 
 
+@pytest.mark.parametrize(("subject", "status"), [("Lunch", 1), ("xippios-live send", 0)])
+def test_only_a_marked_message_is_modified(
+    recorder: ModuleType,
+    replay_fixture: ReplayFixture,
+    respx_mock: respx.MockRouter,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    subject: str,
+    status: int,
+) -> None:
+    monkeypatch.setattr(recorder, "ROOT", tmp_path)
+    monkeypatch.setattr(recorder, "FIXTURES", tmp_path / "fixtures")
+    replay_fixture("oauth2_token", "ok")
+    metadata = {"id": "m1", "payload": {"headers": [{"name": "Subject", "value": subject}]}}
+    read = respx_mock.get(f"{GMAIL}/messages/m1").respond(200, json=metadata)
+    modify = respx_mock.post(f"{GMAIL}/messages/m1/modify").respond(
+        200, json={"id": "m1", "threadId": "m1", "labelIds": ["STARRED"]}
+    )
+    argv = ["modify_message", "ok", "message_id=m1", "add_label_ids=STARRED", "confirm=true"]
+    assert recorder.main(argv) == status
+    assert read.call_count == 1
+    assert httpx.URL(sent_urls(read)[0]).params.get_list("metadataHeaders") == ["Subject"]
+    assert modify.call_count == (1 if status == 0 else 0)
+    assert (tmp_path / "fixtures" / "modify_message").exists() == (status == 0)
+
+
 @pytest.mark.parametrize(
     ("method", "path", "units"),
     [

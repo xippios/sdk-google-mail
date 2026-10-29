@@ -31,6 +31,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+import httpx
 import pytest
 import respx
 from fastapi import APIRouter
@@ -39,7 +40,15 @@ from xippios.core import InvalidRequestError, Result
 from xippios.core.http import router_from_tasks
 from xippios.core.mcp import build_server, tool_name
 from xippios.core.mcp.server import is_write_server, register_tasks
-from xippios.core.testing import Fixture, ReplayFixture, fixture_path, load_fixture, mcp_call
+from xippios.core.testing import (
+    Fixture,
+    ReplayFixture,
+    fixture_path,
+    load_fixture,
+    mcp_call,
+    mcp_call_text,
+    sent_urls,
+)
 
 from xippios.google.mail import tasks, tasks_write
 from xippios.google.mail._client import DEMO, SOURCE
@@ -534,12 +543,23 @@ def test_a_reply_takes_the_original_s_thread_ids_and_subject() -> None:
         (["alice@example.com\r\nBcc: eve@example.com"], r"^to: an address holds no line break"),
         ([""], r"^to: each item is an address"),
         ([3], r"^to: each item is an address"),
+        (
+            ["j@münchen.example"],
+            r"^to: the domain must be ASCII; IDNA encoding is not applied in 0\.1\.0$",
+        ),
+        (["Jürgen <j@münchen.example>"], r"^to: the domain must be ASCII"),
     ],
 )
 def test_addresses_are_refused_by_name_never_by_value(values: Any, message: str) -> None:
     with pytest.raises(InvalidRequestError, match=message) as info:
         addresses("to", values, required=True)
     assert "eve@" not in info.value.message
+    assert "münchen" not in info.value.message
+
+
+def test_a_non_ascii_display_name_with_an_ascii_domain_is_accepted() -> None:
+    (address,) = addresses("to", ["Jürgen <j@muenchen.example>"], required=True)
+    assert (address.display_name, address.domain) == ("Jürgen", "muenchen.example")
 
 
 # Previews: nothing sent --------------------------------------------------------------
@@ -891,6 +911,32 @@ async def test_modify_message_over_mcp(replay_fixture: ReplayFixture) -> None:
     assert "STARRED" in payload["data"]["label_ids"]
 
 
+@pytest.mark.anyio
+async def test_a_write_under_the_read_grant_tells_the_agent_to_re_consent(
+    replay_fixture: ReplayFixture,
+) -> None:
+    """F19's refusal through the write server: the readonly refresh, then the 403.
+
+    ``oauth2_token/ok`` grants ``gmail.readonly`` alone, and
+    ``messages_modify/insufficient_permissions`` is upstream's refusal of a modify under
+    it; the agent reads the re-consent text, never retried.
+    """
+    replay_fixture("oauth2_token", "ok")
+    refused = replay_fixture("messages_modify", "insufficient_permissions")
+    message_id = recorded("messages_modify", "insufficient_permissions").request.url.split("/")[-2]
+    text = await mcp_call_text(
+        write_server,
+        "google_mail_modify_message",
+        {"account": DEMO, "message_id": message_id, "add_label_ids": ["STARRED"], "confirm": True},
+    )
+    assert text == (
+        f"error: AuthError: POST /gmail/v1/users/me/messages/{message_id}/modify answered "
+        "HTTP 403 insufficientPermissions: account demo was granted gmail.readonly; this tool "
+        "needs gmail.modify; re-run xippios-google-mail-auth --account demo --scopes write"
+    )
+    assert refused.call_count == 1, "an AuthError is never retried"
+
+
 # Replies, from the recorded metadata read --------------------------------------------
 
 
@@ -914,7 +960,7 @@ def test_a_reply_s_preview_reads_the_original_once(replay_fixture: ReplayFixture
     references = " ".join(filter(None, [headers.get("references"), headers["message-id"]]))
     assert shown["References"] == references
     assert route.call_count == 1
-    query = route.calls.last.request.url.params
+    query = httpx.URL(sent_urls(route)[-1]).params
     assert query.get_list("format") == ["metadata"]
     assert query.get_list("metadataHeaders") == REPLY_HEADERS
     assert_meta(
