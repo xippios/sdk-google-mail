@@ -1,4 +1,4 @@
-"""Record one exchange of the demo account into a fixture (``/record-fixture``).
+"""Record one exchange, or every exchange a task makes, of the demo account (``/record-fixture``).
 
 Run from the repository root with demo's refresh token and the OAuth client pair
 (``GOOGLE_DEMO_REFRESH_TOKEN``, ``GOOGLE_CLIENT_ID``, ``GOOGLE_CLIENT_SECRET``) in the
@@ -465,7 +465,10 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     """The command line: operation, case, parameters and the modes."""
     parser = argparse.ArgumentParser(
         prog="record_fixture.py",
-        description="Record one exchange of the demo account as a test fixture.",
+        description=(
+            "Record one exchange, or every exchange a task makes, of the demo account as "
+            "test fixtures."
+        ),
     )
     parser.add_argument(
         "operation",

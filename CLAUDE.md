@@ -70,7 +70,9 @@ tests/
                    session-wide write audit hook (sys.addaudithook, off behind a
                    threading.Event) that watches open and the file-system events for the
                    tests that take its no_writes fixture
-  fixtures/        recorded responses, <endpoint>/<case>.json, never hand-written
+  fixtures/        recorded responses, never hand-written: <wrapper>/<case>.json, or
+                   <task>/<case>.json for an exchange recorded through a task (conventions
+                   §10), the k-th exchange of one recording <task>/<case>_<k>.json
   test_family.py   core's family check, one line: namespace levels, py.typed, __version__,
                    the adapters serving exactly the tasks, task shapes and docstrings, the
                    README status table, the template tag, the core bound
@@ -114,7 +116,8 @@ uv run xippios-google-mail-mcp-read --account demo   # bound to one account
 xippios-google-mail-auth --account demo   # --scopes read by default; a consent: the operator's step
 
 direnv exec ~/github/sdk uv run scripts/record_fixture.py get_profile ok   # demo only
-direnv exec ~/github/sdk uv run scripts/record_fixture.py search_messages ok q=newer_than:1y max_results=2
+direnv exec ~/github/sdk uv run scripts/record_fixture.py search_messages ok \
+  q=newer_than:1y max_results=2   # through the task: ok.json, ok_2.json, ok_3.json
 ```
 
 `.github/workflows/live.yml` runs the live tests nightly at 02:37 UTC, a time derived from
@@ -147,16 +150,17 @@ MIME-Version, so `Received`, `ARC-*`, `DKIM-Signature` and `X-Google-*` go; each
 Message-ID, In-Reply-To or References value numbered `<n@example.com>` within the
 fixture; in From, To, Cc, Bcc, Reply-To and Sender, on every part, each `Name <addr>` or
 `"Name" <addr>` made `User <user@example.com>`, a bare address `user@example.com`, since
-a display name identifies its person as the address does (the fixtures recorded on
-2026-10-29, before the rule, keep the sender name "Google"); every `body.data` decoded, its addresses scrubbed and encoded again, `size` as
-served; `attachmentId` to `att-<n>` in the body and the path; a profile-picture URL
-(`lh3.googleusercontent.com/a/...`, shown beside the account a security notice names) to
-`.../a/REDACTED`; `raw` dropped; message and thread ids kept, since replay matches the
-path. A read task's name records through the task, each Gmail exchange under the task's
-name (`ok.json`, then `ok_2.json`, ...). Grep every fixture, its decoded `body.data`
-included, for those shapes and for addresses before committing it. detect-secrets reads
-a `body.data` as a Base64 High Entropy String (F18): a fixture that carries one needs an
-audited `.secrets.baseline` entry.
+a display name identifies its person as the address does (the four fixtures recorded
+before the rule, `get_message/ok`, `get_thread/ok`, `search_messages/ok_2` and
+`search_messages/ok_3`, keep the sender name "Google"); every `body.data` decoded, its
+addresses scrubbed and encoded again, `size` as served; `attachmentId` to `att-<n>` in
+the body and the path; a profile-picture URL (`lh3.googleusercontent.com/a/...`, shown
+beside the account a security notice names) to `.../a/REDACTED`; `raw` dropped; message
+and thread ids kept, since replay matches the path. A read task's name records through
+the task, each Gmail exchange under the task's name (`ok.json`, then `ok_2.json`, ...).
+Grep every fixture, its decoded `body.data` included, for those shapes and for addresses
+before committing it. detect-secrets reads a `body.data` as a Base64 High Entropy String
+(F18): a fixture that carries one needs an audited `.secrets.baseline` entry.
 
 ### The decoded view
 

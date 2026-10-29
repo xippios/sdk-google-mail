@@ -68,6 +68,7 @@ All notable changes to this project are documented here. The format follows
   faithful models of their answers, the whole MIME tree of a message among them.
 - The fixture recorder records through a read task and scrubs a message or thread answer
   as JSON before it writes: headers cut to an allowlist on every part, Message-ID,
-  In-Reply-To and References numbered `<n@example.com>`, every body decoded, its
-  addresses replaced and encoded again, attachment ids numbered, a profile-picture URL
-  redacted and the raw message never kept; its final check reads the decoded bodies too.
+  In-Reply-To and References numbered `<n@example.com>`, display names in the address
+  headers replaced by `User`, every body decoded, its addresses replaced and encoded
+  again, attachment ids numbered, a profile-picture URL redacted and the raw message
+  never kept; its final check reads the decoded bodies too.
