@@ -249,7 +249,8 @@ def test_a_message_to_demo_itself_is_sent_read_back_relabelled_and_trashed(
         assert isinstance(reply.data, ComposePreview)
         shown = {header.name: header.value for header in reply.data.headers}
         assert shown["Subject"] == f"Re: {subject}"
-        assert shown["In-Reply-To"] == header_value(view.headers, "Message-ID")
+        answers_it = shown["In-Reply-To"] == header_value(view.headers, "Message-ID")
+        assert answers_it, "In-Reply-To names the sent message's Message-ID"
         assert reply.data.thread_id == sent.thread_id
         starred = tasks_write.modify_message(
             demo_account, sent.id, add_label_ids=["STARRED"], confirm=True
