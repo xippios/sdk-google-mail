@@ -106,3 +106,6 @@ addopts = "-ra --strict-markers --import-mode=importlib"
 testpaths = ["tests"]
 # record_property, in a live test say, warns under xunit2 when a run writes --junitxml.
 junit_family = "xunit1"
+# Set to core's placeholder in every test not marked live (conventions §10): demo's refresh
+# token and the OAuth client pair, which RefreshTokenAuth reads when it refreshes.
+xippios_placeholder_key_envs = ["GOOGLE_DEMO_REFRESH_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]
