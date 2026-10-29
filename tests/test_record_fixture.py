@@ -516,3 +516,39 @@ def test_a_profile_picture_url_is_redacted(recorder: ModuleType) -> None:
     assert 'src="https://lh3.googleusercontent.com/a/REDACTED"' in page_after
     assert scrubbed_message["snippet"] == "see https://lh3.googleusercontent.com/a/REDACTED"
     assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == []
+
+
+def test_a_task_recording_writes_each_exchange_under_the_task(
+    recorder: ModuleType,
+    replay_fixture: ReplayFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The search's list and two metadata calls, replayed, written as ok, ok_2 and ok_3."""
+    monkeypatch.setattr(recorder, "ROOT", tmp_path)
+    monkeypatch.setattr(recorder, "FIXTURES", tmp_path / "fixtures")
+    replay_fixture("oauth2_token", "ok")
+    routes = [replay_fixture("search_messages", case) for case in ("ok", "ok_2", "ok_3")]
+    argv = ["search_messages", "ok", "q=newer_than:1y", "max_results=2"]
+    assert recorder.main(argv) == 0
+    written = sorted(p.name for p in (tmp_path / "fixtures" / "search_messages").iterdir())
+    assert written == ["ok.json", "ok_2.json", "ok_3.json"]
+    assert [route.call_count for route in routes] == [1, 1, 1]
+    for case in ("ok", "ok_2", "ok_3"):
+        again = json.loads((tmp_path / "fixtures" / "search_messages" / f"{case}.json").read_text())
+        kept = json.loads(
+            (ROOT / "tests" / "fixtures" / "search_messages" / f"{case}.json").read_text()
+        )
+        assert again["response"]["body"] == kept["response"]["body"], "the scrub is idempotent"
+
+
+def test_a_task_that_fails_writes_nothing(
+    recorder: ModuleType,
+    respx_mock: respx.MockRouter,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(recorder, "FIXTURES", tmp_path / "fixtures")
+    assert recorder.main(["search_messages", "ok", "q=x", "max_results=51"]) == 1
+    assert not respx_mock.calls
+    assert not (tmp_path / "fixtures").exists()
