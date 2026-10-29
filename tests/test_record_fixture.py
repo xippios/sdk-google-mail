@@ -632,7 +632,7 @@ def send_exchange(raw: str) -> httpx.Response:
 
 
 def test_a_write_s_raw_is_dropped_from_the_request_body(recorder: ModuleType) -> None:
-    raw = b64url("To: demo.inbox@gmail.com\r\nSubject: xippios-live\r\n\r\nhello\r\n")
+    raw = b64url("To: demo.inbox@example.net\r\nSubject: xippios-live\r\n\r\nhello\r\n")
     fixture = scrubbed(recorder, send_exchange(raw))
     assert json.loads(fixture.request.body or "") == {"threadId": "t1"}, "raw goes, ids stay"
     assert json.loads(fixture.response.body)["labelIds"] == ["SENT"]
