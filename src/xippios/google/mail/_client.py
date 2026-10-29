@@ -152,6 +152,19 @@ def quota_spent(response: httpx.Response) -> float | None:
     return None
 
 
+def _granted_set(auth: RefreshTokenAuth | None) -> str | None:
+    """The name in ``SCOPE_SETS`` of the set ``auth``'s last refresh granted, if it is one.
+
+    ``read`` for ``gmail.readonly``, ``write`` for ``gmail.modify``; the widest set the
+    grant holds whole, ``None`` without an auth, before a refresh or for another grant.
+    """
+    granted = auth.granted_scopes if auth is not None else None
+    if not granted:
+        return None
+    held = [name for name, scopes in SCOPE_SETS.items() if set(scopes) <= granted]
+    return held[-1] if held else None
+
+
 def _scope_refusal(response: httpx.Response, auth: RefreshTokenAuth | None, where: str) -> str:
     """The re-consent message for upstream's refusal of a call the grant does not cover."""
     name = auth.account if auth is not None else "<name>"
@@ -203,7 +216,9 @@ def classify(
       ``WWW-Authenticate: Bearer error="insufficient_scope", scope="..."`` header listing
       the scopes the method accepts; the set to re-run with is the narrowest of
       ``SCOPE_SETS`` among them (``gmail.modify``, ``write``, for a write).
-    - HTTP 401 ``authError``, "Invalid Credentials": ``AuthError`` naming the account.
+    - HTTP 401 ``authError``, "Invalid Credentials": ``AuthError`` naming the account
+      and the consent to re-run if the grant was revoked, with ``--scopes`` and the set
+      the account's last refresh granted when that is one of ``SCOPE_SETS``.
       ``RefreshTokenAuth`` has refreshed the access token once on the first 401 and sent
       the request again, so this is the second refusal.
 
@@ -256,10 +271,13 @@ def classify(
         return AuthError(_scope_refusal(response, auth, where), status=status, source=SOURCE)
     if status == 401 and reason == "authError":
         name = auth.account if auth is not None else "<name>"
+        granted = _granted_set(auth)
+        scopes = f" --scopes {granted}" if granted is not None else ""
         return AuthError(
             f"{where} answered HTTP 401 authError: Gmail refused {named}'s access token, "
             f"also after one refresh; if the account's grant was revoked, re-run "
-            f"{CONSENT_COMMAND} --account {name} and set {TENANTS.var(name, 'REFRESH_TOKEN')}",
+            f"{CONSENT_COMMAND} --account {name}{scopes} and set "
+            f"{TENANTS.var(name, 'REFRESH_TOKEN')}",
             status=status,
             source=SOURCE,
         )

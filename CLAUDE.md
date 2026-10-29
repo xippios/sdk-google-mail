@@ -91,7 +91,7 @@ XIPPIOS_LIVE_TESTS=1 direnv exec ~/github/sdk uv run pytest -m live --tb=short  
 uv run xippios-google-mail-mcp-read   # stdio; --http for streamable HTTP, on loopback
 uv run xippios-google-mail-mcp-read --account demo   # bound to one account
 
-xippios-google-mail-auth --account demo --scopes read   # a consent: the operator's step
+xippios-google-mail-auth --account demo   # --scopes read by default; a consent: the operator's step
 
 direnv exec ~/github/sdk uv run scripts/record_fixture.py get_profile ok   # demo only
 ```

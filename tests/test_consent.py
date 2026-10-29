@@ -48,6 +48,12 @@ def test_help_needs_no_environment_and_no_network(
         assert option in out
 
 
+def test_scopes_default_to_the_read_set() -> None:
+    """The re-run a revoked token's message prints, ``--account <name>`` alone, consents read."""
+    assert _consent._parser().parse_args(["--account", "work"]).scopes == "read"
+    assert _consent._parser().parse_args(["--account", "w", "--scopes", "write"]).scopes == "write"
+
+
 @pytest.mark.parametrize("account", ["Work", "my-account", ""])
 def test_an_account_name_the_registry_refuses_is_a_usage_error(account: str) -> None:
     with pytest.raises(SystemExit) as info:
@@ -135,9 +141,7 @@ def test_one_consent_prints_the_refresh_token_once_and_stores_nothing(
     monkeypatch.setattr(secrets, "token_urlsafe", lambda _: STATE)
     token = respx_mock.post(TOKEN_URL).respond(200, json=READ_ANSWER)
     port = _free_port()
-    thread, codes = _consent_in_a_thread(
-        ["--account", "work", "--scopes", "read", "--port", str(port)]
-    )
+    thread, codes = _consent_in_a_thread(["--account", "work", "--port", str(port)])
     _wait_for_listener(port)
     assert _browse(f"http://127.0.0.1:{port}/favicon.ico") == 404, "another path is ignored"
     assert _browse(f"http://127.0.0.1:{port}/?state={STATE}&code=the-code&scope=x") == 200

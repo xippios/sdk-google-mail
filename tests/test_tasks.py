@@ -29,6 +29,7 @@ from xippios.core.testing import (
 )
 
 from xippios.google.mail import tasks
+from xippios.google.mail._auth import SCOPE_SETS, TOKEN_URL, RefreshTokenAuth
 from xippios.google.mail._client import (
     DAILY_LIMIT_WAIT,
     DEMO,
@@ -175,15 +176,50 @@ def test_an_undeclared_account_is_refused_before_any_request(
 
 
 def test_the_second_401_names_the_account_and_the_path() -> None:
+    """Before any refresh the auth knows no grant: the hint names no ``--scopes``."""
     response = response_from_fixture(recorded("get_profile", "unauthenticated"))
     error = classify(response, auth=refresh_auth(DEMO))
     assert isinstance(error, AuthError)
     assert error.status == 401
-    assert error.message.startswith(
+    assert error.message == (
         "GET /gmail/v1/users/me/profile answered HTTP 401 authError: Gmail refused account "
-        "demo's access token"
+        "demo's access token, also after one refresh; if the account's grant was revoked, "
+        "re-run xippios-google-mail-auth --account demo and set GOOGLE_DEMO_REFRESH_TOKEN"
     )
     assert "gmail.googleapis.com" not in error.message
+
+
+def granted(scopes: str) -> RefreshTokenAuth:
+    """Demo's auth after a refresh whose answer granted ``scopes``, a made-up answer."""
+    auth = refresh_auth(DEMO)
+    request = httpx.Request("POST", TOKEN_URL)
+    answer = {
+        "access_token": "made-up",
+        "expires_in": 3599,
+        "scope": scopes,
+        "token_type": "Bearer",
+    }
+    auth.keep(httpx.Response(200, json=answer, request=request))
+    return auth
+
+
+@pytest.mark.parametrize(
+    ("scopes", "hint"),
+    [
+        (" ".join(SCOPE_SETS["read"]), " --scopes read"),
+        (" ".join(SCOPE_SETS["write"]), " --scopes write"),
+        (" ".join([*SCOPE_SETS["read"], *SCOPE_SETS["write"]]), " --scopes write"),
+        ("https://www.googleapis.com/auth/gmail.labels", ""),
+    ],
+    ids=["read", "write", "both", "another"],
+)
+def test_the_second_401_names_the_scope_set_the_account_was_granted(scopes: str, hint: str) -> None:
+    response = response_from_fixture(recorded("get_profile", "unauthenticated"))
+    error = classify(response, auth=granted(scopes))
+    assert isinstance(error, AuthError)
+    assert error.message.endswith(
+        f"re-run xippios-google-mail-auth --account demo{hint} and set GOOGLE_DEMO_REFRESH_TOKEN"
+    )
 
 
 @pytest.mark.anyio

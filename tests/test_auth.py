@@ -155,10 +155,12 @@ def test_a_second_401_is_an_auth_error(
     with pytest.raises(AuthError) as info:
         tasks.get_profile(DEMO)
     assert info.value.status == 401
-    assert info.value.message.startswith(
+    assert info.value.message == (
         "GET /gmail/v1/users/me/profile answered HTTP 401 authError: Gmail refused account "
-        "demo's access token, also after one refresh"
-    )
+        "demo's access token, also after one refresh; if the account's grant was revoked, "
+        "re-run xippios-google-mail-auth --account demo --scopes read and set "
+        "GOOGLE_DEMO_REFRESH_TOKEN"
+    ), "the refresh granted gmail.readonly, the read set"
     assert (token.call_count, profile.call_count) == (2, 2), "one refresh, one resend, no more"
 
 

@@ -27,7 +27,7 @@ prints the authorization URL to open in a browser signed in to the account, and 
 refresh token once, to stdout; it stores nothing:
 
 ```bash
-xippios-google-mail-auth --account work --scopes read    # gmail.readonly
+xippios-google-mail-auth --account work                  # --scopes read: gmail.readonly
 xippios-google-mail-auth --account work --scopes write   # gmail.modify, every read too
 ```
 

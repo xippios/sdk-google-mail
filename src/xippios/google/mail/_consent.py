@@ -2,8 +2,14 @@
 
 Usage::
 
-    xippios-google-mail-auth --account work --scopes read
+    xippios-google-mail-auth --account work                  # --scopes read, the default
     xippios-google-mail-auth --account demo --scopes write --port 8765
+
+``--scopes`` defaults to ``read``, so the re-run that an expired or revoked refresh
+token's message names (``... re-run xippios-google-mail-auth --account <name> and set
+GOOGLE_<NAME>_REFRESH_TOKEN``, ADR-0025 D-b) consents the read set as printed; a
+deployment that writes re-runs with ``--scopes write``, as the scope refusal's message
+says (D-c).
 
 What it does, in order (the loopback flow with PKCE of
 ``docs/upstream/pages/oauth2-native-app.md``; ADR-0025):
@@ -13,10 +19,10 @@ What it does, in order (the loopback flow with PKCE of
 2. Listens on ``http://127.0.0.1:<port>/``, a random free port unless ``--port`` names
    one, for the one redirect the consent ends with.
 3. Prints the authorization URL on stderr: ``response_type=code``, the scopes of
-   ``--scopes`` (``read`` is ``gmail.readonly``; ``write`` is ``gmail.modify``, which serves
-   every read method too), a PKCE challenge (``code_challenge_method=S256``), a random
-   ``state``, ``access_type=offline`` and ``prompt=consent``, so that Google issues a
-   refresh token every time.
+   ``--scopes`` (``read``, the default, is ``gmail.readonly``; ``write`` is
+   ``gmail.modify``, which serves every read method too), a PKCE challenge
+   (``code_challenge_method=S256``), a random ``state``, ``access_type=offline`` and
+   ``prompt=consent``, so that Google issues a refresh token every time.
 4. Open the URL in a browser signed in to the account and consent. Under WSL2 the
    Windows browser reaches ``127.0.0.1:<port>`` through localhost forwarding. A request
    to another path (a browser's ``/favicon.ico``) is answered 404 and ignored; a redirect
@@ -164,9 +170,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--scopes",
-        required=True,
+        default="read",
         choices=sorted(SCOPE_SETS),
-        help="read (gmail.readonly) or write (gmail.modify, which serves every read too)",
+        help=(
+            "read (gmail.readonly), the default, or write (gmail.modify, which serves every "
+            "read too)"
+        ),
     )
     parser.add_argument(
         "--port", type=int, default=0, help="loopback port for the redirect; 0, a free one"
