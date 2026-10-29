@@ -4,21 +4,33 @@
 its first argument: Gmail answers for the user the bearer names, ``userId`` ``me``. A
 module and its function carry the operation's id in the discovery document minus the
 prefix every method shares, ``gmail.users.``, in snake case (conventions §2):
-``gmail.users.messages.attachments.get`` is ``messages_attachments_get``.
+``gmail.users.messages.attachments.get`` is ``messages_attachments_get``. The five
+wrappers that write, ``drafts_create``, ``drafts_delete``, ``messages_send``,
+``messages_modify`` and ``messages_trash``, serve ``tasks_write`` only.
 """
 
+from xippios.google.mail.api.drafts_create import drafts_create
+from xippios.google.mail.api.drafts_delete import drafts_delete
 from xippios.google.mail.api.get_profile import get_profile
 from xippios.google.mail.api.labels_list import labels_list
 from xippios.google.mail.api.messages_attachments_get import messages_attachments_get
 from xippios.google.mail.api.messages_get import messages_get
 from xippios.google.mail.api.messages_list import messages_list
+from xippios.google.mail.api.messages_modify import messages_modify
+from xippios.google.mail.api.messages_send import messages_send
+from xippios.google.mail.api.messages_trash import messages_trash
 from xippios.google.mail.api.threads_get import threads_get
 
 __all__ = [
+    "drafts_create",
+    "drafts_delete",
     "get_profile",
     "labels_list",
     "messages_attachments_get",
     "messages_get",
     "messages_list",
+    "messages_modify",
+    "messages_send",
+    "messages_trash",
     "threads_get",
 ]
