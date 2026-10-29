@@ -28,6 +28,7 @@ testing = ["xippios-core[testing]~=0.3.0"]
 
 [project.scripts]
 xippios-google-mail-mcp-read = "xippios.google.mail.mcp:run"
+xippios-google-mail-auth = "xippios.google.mail._consent:run"
 
 [project.urls]
 Homepage = "https://github.com/xippios/sdk-google-mail"
