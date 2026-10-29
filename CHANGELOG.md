@@ -25,3 +25,26 @@ All notable changes to this project are documented here. The format follows
   scaffold, rendered without a key, said none was needed; CLAUDE.md's rate-limit row
   names upstream's quota, 6,000 units per minute per user per project, where it said
   upstream documents no limit.
+- Several Gmail accounts from the environment: `GOOGLE_ACCOUNTS` names them, one
+  `GOOGLE_<NAME>_REFRESH_TOKEN` each, and the test account `demo` is declared by
+  `GOOGLE_DEMO_REFRESH_TOKEN` alone. Each account has a client of its own, whose auth
+  exchanges the refresh token at Google's token endpoint with the operator's OAuth client
+  (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) and sends the access token as a bearer,
+  renewed in memory before it expires and once more on a 401; nothing is written to disk.
+  A revoked or expired refresh token is an `AuthError` that says how to consent again; a
+  client the token endpoint refuses is a `ConfigError` naming the two client variables.
+- `xippios-google-mail-auth --account <name> [--scopes read|write]`, the consent tool
+  (`read` by default): a loopback redirect with PKCE that prints the account's refresh
+  token once and stores nothing.
+- `list_accounts`, the declared accounts by name, and `get_profile(account)`, the
+  account's address, message and thread counts and history id (`users.getProfile`).
+- `--account <name>` binds the read server to one account: every tool acts on it and
+  takes no `account`.
+- The read server is served over `--http` on a loopback `--host` only, unless
+  `--allow-remote` is passed: it reaches every declared mailbox and carries no
+  authentication.
+- Gmail's error answers mapped: a spent per-minute or daily quota is a `RateLimitError`
+  (60 s, 3,600 s), a grant without the scope a call needs an `AuthError` naming the
+  scopes granted and the consent to re-run, a domain policy or a refused access token an
+  `AuthError`; each account's requests are paced at 60 a minute and held back for a
+  minute after a spent quota.

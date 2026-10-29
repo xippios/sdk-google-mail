@@ -1,0 +1,61 @@
+{
+  "recorded_at": "2026-10-29T13:11:25.622060Z",
+  "request": {
+    "body": "{}",
+    "body_base64": false,
+    "content_type": "application/json",
+    "method": "POST",
+    "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages/1a18715327e2e304/modify"
+  },
+  "response": {
+    "body": "{\n  \"error\": {\n    \"code\": 403,\n    \"message\": \"Request had insufficient authentication scopes.\",\n    \"errors\": [\n      {\n        \"message\": \"Insufficient Permission\",\n        \"domain\": \"global\",\n        \"reason\": \"insufficientPermissions\"\n      }\n    ],\n    \"status\": \"PERMISSION_DENIED\",\n    \"details\": [\n      {\n        \"@type\": \"type.googleapis.com/google.rpc.ErrorInfo\",\n        \"reason\": \"ACCESS_TOKEN_SCOPE_INSUFFICIENT\",\n        \"domain\": \"googleapis.com\",\n        \"metadata\": {\n          \"service\": \"gmail.googleapis.com\",\n          \"method\": \"caribou.api.proto.MailboxService.ModifyMessage\"\n        }\n      }\n    ]\n  }\n}\n",
+    "body_base64": false,
+    "headers": [
+      [
+        "www-authenticate",
+        "Bearer realm=\"https://accounts.google.com/\", error=\"insufficient_scope\", scope=\"https://mail.google.com/ https://mail.google.com/mail/feed/atom https://mail.google.com https://mail.google.com/mail/feed/atom/ https://mail.google.com/mail https://mail.google.com/mail/ http://mail.google.com/ http://mail.google.com https://www.googleapis.com/auth/gmail.messages https://www.googleapis.com/auth/gmail.messages.delete https://www.googleapis.com/auth/gmail.messages.modify https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.modify.restricted\""
+      ],
+      [
+        "vary",
+        "Origin"
+      ],
+      [
+        "vary",
+        "X-Origin"
+      ],
+      [
+        "vary",
+        "Referer"
+      ],
+      [
+        "content-type",
+        "application/json; charset=UTF-8"
+      ],
+      [
+        "date",
+        "Thu, 29 Oct 2026 13:11:24 GMT"
+      ],
+      [
+        "server",
+        "ESF"
+      ],
+      [
+        "x-xss-protection",
+        "0"
+      ],
+      [
+        "x-frame-options",
+        "SAMEORIGIN"
+      ],
+      [
+        "x-content-type-options",
+        "nosniff"
+      ],
+      [
+        "alt-svc",
+        "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+      ]
+    ],
+    "status": 403
+  }
+}
