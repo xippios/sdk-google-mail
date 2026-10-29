@@ -144,7 +144,10 @@ JSON first (`MessageScrub`, the investigation's §2.7 list): every part's header
 From, To, Cc, Bcc, Date, Subject, Message-ID, In-Reply-To, References, Content-Type and
 MIME-Version, so `Received`, `ARC-*`, `DKIM-Signature` and `X-Google-*` go; each id of a
 Message-ID, In-Reply-To or References value numbered `<n@example.com>` within the
-fixture; every `body.data` decoded, its addresses scrubbed and encoded again, `size` as
+fixture; in From, To, Cc, Bcc, Reply-To and Sender, on every part, each `Name <addr>` or
+`"Name" <addr>` made `User <user@example.com>`, a bare address `user@example.com`, since
+a display name identifies its person as the address does (the fixtures recorded on
+2026-10-29, before the rule, keep the sender name "Google"); every `body.data` decoded, its addresses scrubbed and encoded again, `size` as
 served; `attachmentId` to `att-<n>` in the body and the path; a profile-picture URL
 (`lh3.googleusercontent.com/a/...`, shown beside the account a security notice names) to
 `.../a/REDACTED`; `raw` dropped; message and thread ids kept, since replay matches the

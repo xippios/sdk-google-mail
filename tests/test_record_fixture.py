@@ -358,7 +358,7 @@ def test_a_message_keeps_the_allowlisted_headers_and_numbered_ids(recorder: Modu
     assert values["Message-Id"] == "<1@example.com>"
     assert values["References"] == "<2@example.com> <3@example.com>"
     assert values["In-Reply-To"] == "<3@example.com>", "the same id, the same number"
-    assert values["From"] == "Alice Example <user@example.com>"
+    assert values["From"] == "User <user@example.com>", "the display name goes too"
     assert values["To"] == "user@example.com"
     plain_headers = parts_of(payload)[2]["headers"]
     assert [h["name"] for h in plain_headers] == ["Content-Type"], "every part's headers"
@@ -539,7 +539,12 @@ def test_a_task_recording_writes_each_exchange_under_the_task(
         kept = json.loads(
             (ROOT / "tests" / "fixtures" / "search_messages" / f"{case}.json").read_text()
         )
-        assert again["response"]["body"] == kept["response"]["body"], "the scrub is idempotent"
+        body = again["response"]["body"]
+        assert recorder.MessageScrub().body(body) == body, "the scrub is idempotent"
+        assert again["request"] == kept["request"]
+        if case != "ok":  # the committed fixtures keep "Google", recorded before the rule
+            headers = {h["name"]: h["value"] for h in json.loads(body)["payload"]["headers"]}
+            assert headers["From"] == "User <user@example.com>"
 
 
 def test_a_task_that_fails_writes_nothing(
@@ -552,3 +557,56 @@ def test_a_task_that_fails_writes_nothing(
     assert recorder.main(["search_messages", "ok", "q=x", "max_results=51"]) == 1
     assert not respx_mock.calls
     assert not (tmp_path / "fixtures").exists()
+
+
+@pytest.mark.parametrize(
+    ("value", "scrubbed"),
+    [
+        ("Alice Example <alice@corp.example.org>", "User <user@example.com>"),
+        ('"Doe, John" <john@corp.example.org>', "User <user@example.com>"),
+        ('"" <john@corp.example.org>', "<user@example.com>"),
+        ("<john@corp.example.org>", "<user@example.com>"),
+        ("john@corp.example.org", "user@example.com"),
+        (
+            'Alice <a@x.example>, "Doe, John" <j@y.example>,<c@z.example>, d@w.example',
+            "User <user@example.com>, User <user@example.com>,<user@example.com>, user@example.com",
+        ),
+        ("undisclosed-recipients:;", "undisclosed-recipients:;"),
+    ],
+)
+def test_an_address_header_keeps_no_display_name(
+    recorder: ModuleType, value: str, scrubbed: str
+) -> None:
+    assert recorder.scrub_emails(recorder.scrub_display_names(value)) == scrubbed
+
+
+def test_display_names_go_on_every_part_s_address_headers_alone(recorder: ModuleType) -> None:
+    """From, To, Cc and Bcc of the payload and of a part; Subject keeps its words."""
+    forwarded = {
+        "partId": "1",
+        "mimeType": "message/rfc822",
+        "filename": "",
+        "headers": [
+            {"name": "From", "value": '"Bob Builder" <bob@corp.example.org>'},
+            {"name": "Cc", "value": "Carol <carol@corp.example.org>, dave@corp.example.org"},
+        ],
+        "body": {"size": 0},
+    }
+    message = made_up_message()
+    message["payload"]["headers"] = [
+        {"name": "To", "value": "Alice Example <alice@corp.example.org>"},
+        {"name": "bcc", "value": "Eve <eve@corp.example.org>"},
+        {"name": "Reply-To", "value": "Alice Example <alice@corp.example.org>"},
+        {"name": "Subject", "value": "Lunch with Alice Example <alice@corp.example.org>"},
+    ]
+    message["payload"]["parts"] = [forwarded]
+    payload = json.loads(scrubbed(recorder, message_exchange(message)).response.body)["payload"]
+    assert payload["headers"] == [
+        {"name": "To", "value": "User <user@example.com>"},
+        {"name": "bcc", "value": "User <user@example.com>"},
+        {"name": "Subject", "value": "Lunch with Alice Example <user@example.com>"},
+    ], "Reply-To is off the allowlist; a Subject is no address header"
+    assert payload["parts"][0]["headers"] == [
+        {"name": "From", "value": "User <user@example.com>"},
+        {"name": "Cc", "value": "User <user@example.com>, user@example.com"},
+    ]

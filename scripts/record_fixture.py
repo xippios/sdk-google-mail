@@ -86,6 +86,12 @@ investigation's §2.7 list for messages and threads, numbering within the one fi
 - each ``<...>`` of a ``Message-ID``, ``In-Reply-To`` or ``References`` value becomes
   ``<n@example.com>``, the same id the same ``n`` (a reply's ``In-Reply-To`` names the
   number its parent's ``Message-ID`` got);
+- in an address header (``ADDRESS_HEADERS``: From, To, Cc, Bcc, Reply-To, Sender, on
+  every part), each ``Name <addr>`` or ``"Name" <addr>`` becomes ``User
+  <user@example.com>``, an ``<addr>`` without a name ``<user@example.com>`` and a bare
+  ``addr`` ``user@example.com``, the separators kept: a display name identifies its
+  person as the address does (``scrub_display_names``); Reply-To and Sender are not on
+  the allowlist, so they go before the rule reaches them, unless the list grows;
 - every ``body.data`` is base64url decoded, its addresses made ``user@example.com``
   (bytes that are not UTF-8 kept as they came) and encoded again in upstream's padding,
   ``size`` left as served;
@@ -312,6 +318,32 @@ HEADER_ALLOWLIST = (
 _ALLOWED = frozenset(name.lower() for name in HEADER_ALLOWLIST)
 MESSAGE_ID_HEADERS = frozenset({"message-id", "in-reply-to", "references"})
 """The headers whose ids become ``<n@example.com>``, lower-cased."""
+ADDRESS_HEADERS = frozenset({"from", "to", "cc", "bcc", "reply-to", "sender"})
+"""The headers whose display names become ``User``, lower-cased."""
+_NAMED_ADDRESS = re.compile(
+    r'(?P<lead>^|,)(?P<space>\s*)(?P<name>"(?:[^"\\]|\\.)*"|[^,<>"]*?)\s*<[^<>]*>'
+)
+"""One ``name <addr>`` of an address list: a quoted name, which may hold a comma, or a
+plain one, then the address in angle brackets; ``lead`` the comma before it, if any."""
+
+
+def scrub_display_names(value: str) -> str:
+    """An address header's value with every name and address made the placeholder's.
+
+    ``Alice <a@x.org>, "Doe, John" <j@y.org>, <c@z.org>, d@w.org`` becomes ``User
+    <user@example.com>, User <user@example.com>, <user@example.com>, d@w.org``, whose
+    bare address the address scrub then makes ``user@example.com``. A value without an
+    angle-bracketed address is returned as given.
+    """
+
+    def named(match: re.Match[str]) -> str:
+        name = match["name"].strip()
+        address = f"<{SCRUBBED_EMAIL}>" if name in ("", '""') else f"User <{SCRUBBED_EMAIL}>"
+        return f"{match['lead']}{match['space']}{address}"
+
+    return _NAMED_ADDRESS.sub(named, value)
+
+
 _ANGLED = re.compile(r"<[^<>]*>")
 MESSAGE_ID_SHAPE = re.compile(r"<(?![A-Za-z][A-Za-z0-9+.-]*:)[^<>\s@]+@[^<>\s]+>")
 """A ``<local@domain>``, the shape of a Message-ID and of an address in angle brackets.
@@ -397,10 +429,13 @@ class MessageScrub:
         return scrubbed
 
     def header(self, item: dict[str, Any]) -> dict[str, Any]:
-        """One kept MIME header, its ids numbered and its addresses scrubbed."""
+        """One kept MIME header: its ids numbered, its names and addresses scrubbed."""
         value = item.get("value")
-        if isinstance(value, str) and str(item["name"]).lower() in MESSAGE_ID_HEADERS:
+        name = str(item["name"]).lower()
+        if isinstance(value, str) and name in MESSAGE_ID_HEADERS:
             return {**item, "value": self.header_value(value)}
+        if isinstance(value, str) and name in ADDRESS_HEADERS:
+            item = {**item, "value": scrub_display_names(value)}
         return {key: self.node(field) for key, field in item.items()}
 
     def body(self, body: str) -> str:
