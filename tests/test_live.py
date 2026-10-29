@@ -58,7 +58,7 @@ def test_list_labels_answers_for_demo(demo_account: str) -> None:
 
 
 def first_message_id(account: str) -> tuple[str, str]:
-    """The id and thread id of the newest message, from one ``messages.list`` (5 units)."""
+    """The first id the list returns and its thread id, from one ``messages.list`` (5 units)."""
     listed = tasks.list_messages(account, max_results=1).data
     assert len(listed.messages) == 1, "demo's mailbox holds messages"
     return listed.messages[0].id, listed.messages[0].thread_id
