@@ -75,6 +75,11 @@ exactly tasks.__all__. -->
 | --- | --- | --- | --- |
 | none: the declared accounts | `list_accounts` | `google_mail_list_accounts` | available; names only, no request |
 | `GET gmail/v1/users/{userId}/profile` (`users.getProfile`) | `get_profile(account)` | `google_mail_get_profile` | available; `userId` `me`, the account's own |
+| `GET gmail/v1/users/{userId}/labels` (`users.labels.list`) | `list_labels(account)` | `google_mail_list_labels` | available; the label ids `label_ids` takes |
+| `GET gmail/v1/users/{userId}/messages` (`users.messages.list`) | `list_messages(account, q=None, label_ids=None, max_results=None, page_token=None, include_spam_trash=False)` | `google_mail_list_messages` | available; ids only, one page; `q` in Gmail's search syntax, verbatim; `result_size_estimate` upstream's estimate, `meta.total` `None` |
+| `users.messages.list`, then `GET gmail/v1/users/{userId}/messages/{id}` (`users.messages.get`, `format=metadata`) per id | `search_messages(account, q, label_ids=None, max_results=20)` | `google_mail_search_messages` | available; From, Subject, Date and snippet per message; `max_results` at most 50 (5 + 20 quota units a message) |
+| `GET gmail/v1/users/{userId}/messages/{id}` (`users.messages.get`, `format=full`) | `get_message(account, message_id, include_html=False)` | `google_mail_get_message` | available; the decoded view: nine headers, the plain text, the HTML on request, the attachments' metadata (no content) |
+| `GET gmail/v1/users/{userId}/threads/{id}` (`users.threads.get`, `format=full`) | `get_thread(account, thread_id, start=0, limit=None)` | `google_mail_get_thread` | available; each message's decoded view, text only; `start` and `limit` read a long thread in parts |
 
 ## Upstream terms and attribution
 
