@@ -12,9 +12,9 @@ the family rules every source shares are in `.claude/family.md`, which the next 
 | --- | --- |
 | Upstream | Gmail, https://developers.google.com/workspace/gmail/api |
 | API base URL | `https://gmail.googleapis.com/gmail/v1/users/me` |
-| Documentation | https://developers.google.com/workspace/gmail/api/reference/rest, snapshotted in `docs/upstream/`; an OpenAPI or Swagger document a page names is kept beside it, its URL in `SPEC_URL` of `scripts/refresh_upstream.py` (`/refresh-upstream`) |
-| Credentials | none; the API is open |
-| Rate limit | 60 requests per minute, burst 10; a self-imposed pace: upstream documents no per-second or per-minute limit (ADR-0010); enforced client-side in `_client.py` <!-- name here an hourly or daily quota upstream documents, if any, and the QuotaPolicy that keeps it (ADR-0015) --> |
+| Documentation | Gmail's discovery document, https://gmail.googleapis.com/$discovery/rest?version=v1, which the REST reference https://developers.google.com/workspace/gmail/api/reference/rest names (`SPEC_URL` of `scripts/refresh_upstream.py`), kept as `docs/upstream/discovery.json` with its keys sorted; beside it, as Markdown under `docs/upstream/pages/`, the usage limits, the errors, the scopes, the Gmail Help article on search operators and Google's OAuth 2.0 overview and guides for desktop apps and web server applications (`/refresh-upstream`) |
+| Credentials | from PR 3 on, an OAuth 2.0 bearer renewed from a refresh token per account: the operator's Desktop-app client `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, the account list `GOOGLE_ACCOUNTS` and one `GOOGLE_<NAME>_REFRESH_TOKEN` per account (`demo` declared by `GOOGLE_DEMO_REFRESH_TOKEN` alone, never listed), from the environment; the package exchanges the refresh token at `POST https://oauth2.googleapis.com/token` and sends the access token as a bearer (queue row 252); a refresh token comes from `xippios-google-mail-auth`; the nightly `live.yml` passes the client pair and demo's token as org secrets |
+| Rate limit | 60 requests per minute, burst 10, a self-imposed pace (per account from PR 3 on), enforced client-side in `_client.py`; upstream documents a quota in units, 6,000 per minute per user per project and 1,200,000 per minute per project, with the units per method on the quota page, `docs/upstream/pages/quota.md` (`messages.get` 20, 60 with `format=full`, its default; `threads.get` 40, 120 with `format=full`, its default), so 60 full `threads.get` in a minute (7,200 units) would exceed the per-user quota; the QuotaPolicy on the 403 quota reasons comes with PR 3 (ADR-0010, ADR-0015) |
 | Write tools | no, this package is read-only |
 
 The snapshot listed in `docs/upstream/FETCHED.md` is the reference for names, parameters and semantics.
@@ -41,8 +41,8 @@ src/xippios/google/mail/
   reference/       packaged code lists (CSV/JSON) plus README with provenance
 scripts/
   refresh_reference.py   fetches the packaged lists through api/ and regenerates enums.py
-  refresh_upstream.py    captures docs/upstream/ and writes FETCHED.md (/refresh-upstream); the
-                         template's skeleton until the source fills it
+  refresh_upstream.py    captures docs/upstream/ and writes FETCHED.md (/refresh-upstream): the
+                         discovery document, its keys sorted, and seven pages as Markdown
 tests/
   conftest.py      enables xippios.core.testing.plugin, which keeps the run offline
   fixtures/        recorded responses, <endpoint>/<case>.json, never hand-written
@@ -77,8 +77,18 @@ uv run xippios-google-mail-mcp-read   # stdio; add --http for streamable HTTP
 
 `.github/workflows/live.yml` runs the live tests nightly at 02:37 UTC, a time derived from
 the slug.
-The API needs no key, so the workflow uses no secret.
+From PR 3 on it passes the three org secrets `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and
+`GOOGLE_DEMO_REFRESH_TOKEN` by hand, since the template renders `_API_KEY` secrets only
+(queue row 255); until then it uses no secret.
 
 ## Gmail specifics
 
-<!-- What only this package knows: upstream behaviour established by fixtures, the client's quirks, sections of its own. Fill this section or delete it. -->
+### The credentials
+
+`GOOGLE_CLIENT_SECRET`, every `GOOGLE_<NAME>_REFRESH_TOKEN` and any access token are never
+read by value, printed, logged or written to a file or a commit, and `.envrc` is never
+read; code reads the variables by name. They reach a process only through `direnv exec`
+from the family workspace's root, whose `.envrc` holds them, or through the org secrets.
+No process listing or environment dump (`env`, `printenv`, `set`, `export`, `ps`,
+`/proc/*/environ`). A fixture is recorded through the recorder's scrub only, never by
+hand; the recorder, `scripts/record_fixture.py`, comes with PR 3.
