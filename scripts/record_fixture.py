@@ -62,10 +62,10 @@ and ``References`` to ``<n@example.com>``, ``payload.headers`` cut to an allowli
 ``TEXT_REWRITES`` and ``rewrite``. Last, before the one write, ``check`` searches the
 fixture's text and every decoded string of a JSON body for what must never be written:
 the secret values in any of those forms, Google's token shapes (``ya29.``, ``1//``,
-``GOCSPX-``, ``apps.googleusercontent.com``), an address other than ``user@example.com``,
-and a token field whose value is not ``REDACTED``. Any of them means nothing is written
-and the exit status is 1; a refusal names what, never a value. Only the status, the
-method, the scrubbed URL and the quota units are printed.
+``GOCSPX-``, ``apps.googleusercontent.com``), also percent-decoded, an address other than
+``user@example.com``, and a token field whose value is not ``REDACTED``. Any of them
+means nothing is written and the exit status is 1; a refusal names what, never a value.
+Only the status, the method, the scrubbed URL and the quota units are printed.
 """
 
 import argparse
@@ -77,7 +77,7 @@ import sys
 from collections.abc import Callable, Generator, Iterator, Sequence
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, quote, quote_plus, urlencode
+from urllib.parse import parse_qsl, quote, quote_plus, unquote_plus, urlencode
 
 import httpx
 from xippios.core import AsyncClient, RetryPolicy, sync
@@ -317,6 +317,7 @@ def check(text: str, fixture: Fixture, secrets: Sequence[str]) -> list[str]:
         except ValueError:
             decoded = None
         texts.extend(_strings(decoded))
+    texts.extend([unquote_plus(item) for item in texts])  # a form body's or a query's
     leaks: list[str] = []
     pattern = _secret_pattern(secrets)
     if pattern is not None and any(pattern.search(item) for item in texts):
