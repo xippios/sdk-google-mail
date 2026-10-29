@@ -9,6 +9,8 @@ placeholder (``xippios_placeholder_key_envs``), so the refresh sends the placeho
 
 import json
 import os
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from pathlib import Path
 from urllib.parse import parse_qsl
 
@@ -223,19 +225,46 @@ def _files(root: Path) -> set[Path]:
 
 
 def test_nothing_is_written_to_disk(
-    replay_fixture: ReplayFixture, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    replay_fixture: ReplayFixture,
+    respx_mock: respx.MockRouter,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    no_writes: Callable[[], AbstractContextManager[list[tuple[str, str]]]],
 ) -> None:
-    """A refresh, its reuse and a 401's renewal leave no file in HOME, the cwd or the repo."""
+    """A refresh, its reuse and a 401's renewal attempt no file write anywhere.
+
+    An audit hook watches every ``open`` for writing and every file-system change of the
+    process, in every thread, the sync facade's loop among them; a first call outside the
+    watch loads what the calls import. HOME, the cwd and the repository are listed too.
+    """
     home, cwd = tmp_path / "home", tmp_path / "cwd"
     home.mkdir()
     cwd.mkdir()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.chdir(cwd)
     before = _files(ROOT)
-    replay_fixture("oauth2_token", "ok")
-    replay_fixture("get_profile", "ok")
-    tasks.get_profile(DEMO)
-    tasks.get_profile(DEMO)
+    token = replay_fixture("oauth2_token", "ok")
+    ok, refused = recorded("get_profile", "ok"), recorded("get_profile", "unauthenticated")
+    profile = respx_mock.get(PROFILE_URL)
+    profile.side_effect = [answer(ok), answer(ok), answer(ok), answer(refused), answer(ok)]
+    tasks.get_profile(DEMO)  # outside the watch: the first imports
+    TENANTS.reset()
+    with no_writes() as writes:
+        tasks.get_profile(DEMO)  # a refresh
+        tasks.get_profile(DEMO)  # its reuse
+        tasks.get_profile(DEMO)  # a 401, renewed and sent again
+    assert writes == []
+    assert (token.call_count, profile.call_count) == (3, 5)
     assert list(home.iterdir()) == []
     assert list(cwd.iterdir()) == []
     assert _files(ROOT) == before
+
+
+def test_the_write_audit_sees_a_write(
+    tmp_path: Path, no_writes: Callable[[], AbstractContextManager[list[tuple[str, str]]]]
+) -> None:
+    """The watch the test above relies on reports an ``open`` for writing and a ``mkdir``."""
+    with no_writes() as writes:
+        (tmp_path / "made").mkdir()
+        (tmp_path / "made" / "file").write_text("x")
+    assert [event for event, _ in writes] == ["os.mkdir", "open"]

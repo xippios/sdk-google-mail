@@ -1,9 +1,14 @@
 # Queue row 281: the demo-only strip is a copy of sdk-cashctrl's tests/conftest.py, part of
 # the kit that returns to xippios-core in 0.4.0 (ADR-0023, decision 4; ADR-0025, D-d).
 # This file is the template's, edited by hand for the account model (class human).
+import contextlib
 import os
 import re
-from collections.abc import Iterator
+import sys
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager
+from typing import Any
 
 import pytest
 
@@ -59,3 +64,68 @@ def demo_account() -> str:
     names = TENANTS.names()
     assert names == (DEMO,), "live tests run against the demo account and nothing else"
     return DEMO
+
+
+_WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
+_WRITE_EVENTS = frozenset(
+    {
+        "os.mkdir",
+        "os.rename",
+        "os.replace",
+        "os.remove",
+        "os.rmdir",
+        "os.truncate",
+        "os.link",
+        "os.symlink",
+        "shutil.copyfile",
+        "tempfile.mkstemp",
+        "tempfile.mkdtemp",
+    }
+)
+
+
+class _WriteAudit:
+    """Every file write the process attempts, in any thread, while ``watching``.
+
+    One audit hook for the session (``sys.addaudithook`` cannot be removed), off unless
+    a test watches: ``open`` with a writing mode or flags, and the file-system events of
+    ``_WRITE_EVENTS``. Python's own bytecode cache (``__pycache__``) is not counted.
+    """
+
+    def __init__(self) -> None:
+        self._on = threading.Event()
+        self.writes: list[tuple[str, str]] = []
+
+    def __call__(self, event: str, args: tuple[Any, ...]) -> None:
+        if not self._on.is_set():
+            return
+        if event == "open":
+            path, mode, flags = (*args, None, None, None)[:3]
+            writing = (isinstance(mode, str) and any(c in mode for c in "wax+")) or (
+                isinstance(flags, int) and bool(flags & _WRITE_FLAGS)
+            )
+        elif event in _WRITE_EVENTS:
+            path, writing = (args[0] if args else None), True
+        else:
+            return
+        if writing and "__pycache__" not in str(path):
+            self.writes.append((event, str(path)))
+
+    @contextlib.contextmanager
+    def watching(self) -> Iterator[list[tuple[str, str]]]:
+        self.writes = []
+        self._on.set()
+        try:
+            yield self.writes
+        finally:
+            self._on.clear()
+
+
+_AUDIT = _WriteAudit()
+sys.addaudithook(_AUDIT)
+
+
+@pytest.fixture
+def no_writes() -> Callable[[], AbstractContextManager[list[tuple[str, str]]]]:
+    """``with no_writes() as writes:`` collects every file write attempted inside the block."""
+    return _AUDIT.watching

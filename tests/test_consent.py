@@ -13,7 +13,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager
 from urllib.parse import parse_qsl, urlsplit
 
 import httpx
@@ -137,15 +138,19 @@ def test_one_consent_prints_the_refresh_token_once_and_stores_nothing(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     respx_mock: respx.MockRouter,
+    no_writes: Callable[[], AbstractContextManager[list[tuple[str, str]]]],
 ) -> None:
+    """The listener, the redirect and the code exchange attempt no file write anywhere."""
     monkeypatch.setattr(secrets, "token_urlsafe", lambda _: STATE)
     token = respx_mock.post(TOKEN_URL).respond(200, json=READ_ANSWER)
     port = _free_port()
-    thread, codes = _consent_in_a_thread(["--account", "work", "--port", str(port)])
-    _wait_for_listener(port)
-    assert _browse(f"http://127.0.0.1:{port}/favicon.ico") == 404, "another path is ignored"
-    assert _browse(f"http://127.0.0.1:{port}/?state={STATE}&code=the-code&scope=x") == 200
-    thread.join(timeout=10)
+    with no_writes() as writes:
+        thread, codes = _consent_in_a_thread(["--account", "work", "--port", str(port)])
+        _wait_for_listener(port)
+        assert _browse(f"http://127.0.0.1:{port}/favicon.ico") == 404, "another path is ignored"
+        assert _browse(f"http://127.0.0.1:{port}/?state={STATE}&code=the-code&scope=x") == 200
+        thread.join(timeout=10)
+    assert writes == []
     assert codes == [0]
     out, err = capsys.readouterr()
     assert out == f"{REFRESH}\n", "the token alone on stdout, once"
