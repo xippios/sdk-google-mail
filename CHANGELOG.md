@@ -48,3 +48,25 @@ All notable changes to this project are documented here. The format follows
   scopes granted and the consent to re-run, a domain policy or a refused access token an
   `AuthError`; each account's requests are paced at 60 a minute and held back for a
   minute after a spent quota.
+
+- The read tasks on a mailbox, each with the account first: `list_labels`, the labels
+  whose ids `label_ids` takes (`users.labels.list`); `list_messages`, one page of message
+  and thread ids for a query in Gmail's own search syntax, sent verbatim, or for labels,
+  with upstream's `resultSizeEstimate` as data and no total (`users.messages.list`);
+  `search_messages`, at most 50 messages with their From, Subject, Date and snippet, a
+  list and one `format=metadata` call per message (5 + 20 quota units each);
+  `get_message`, one message's decoded view (`users.messages.get`, `format=full`): its
+  From, To, Cc, Bcc, Date, Subject, Message-ID, In-Reply-To and References headers, the
+  first plain-text part decoded in its charset, the first HTML part on request
+  (`include_html`), and its attachments' metadata, never their content; and
+  `get_thread`, the views of a thread's messages as text (`users.threads.get`,
+  `format=full`), from `start` and at most `limit`, a cut answer ending with where to
+  resume.
+- Endpoint wrappers for `users.labels.list`, `users.messages.list`, `users.messages.get`,
+  `users.threads.get` and `users.messages.attachments.get`, the last without a task, and
+  faithful models of their answers, the whole MIME tree of a message among them.
+- The fixture recorder records through a read task and scrubs a message or thread answer
+  as JSON before it writes: headers cut to an allowlist on every part, Message-ID,
+  In-Reply-To and References numbered `<n@example.com>`, every body decoded, its
+  addresses replaced and encoded again, attachment ids numbered, a profile-picture URL
+  redacted and the raw message never kept; its final check reads the decoded bodies too.
