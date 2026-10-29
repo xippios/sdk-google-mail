@@ -15,3 +15,8 @@ All notable changes to this project are documented here. The format follows
 - The read server's entry point is `xippios-google-mail-mcp-read`, since a write
   server with an entry point of its own follows in this release (decision of
   2026-10-29).
+- The documentation snapshot in `docs/upstream/`, captured on 2026-10-29 by
+  `scripts/refresh_upstream.py`: Gmail's discovery document (revision 20261026, kept
+  with its keys sorted), the API's usage limits, errors and scopes, the Gmail Help
+  article on search operators, and Google's OAuth 2.0 overview with its guides for
+  desktop apps and web server applications, the pages as Markdown.
