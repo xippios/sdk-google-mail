@@ -128,6 +128,9 @@ a loopback `--host` over `--http` unless `--allow-remote` is passed:
 }
 ```
 
+Its refresh tokens come from `xippios-google-mail-auth --scopes write`; a deployment that
+only reads keeps the default `read` grant, which cannot change a mailbox.
+
 Five write tools store a draft (`google_mail_create_draft`), delete one
 (`google_mail_delete_draft`), send a message (`google_mail_send_message`), change a
 message's labels (`google_mail_modify_message`) and move a message to the trash

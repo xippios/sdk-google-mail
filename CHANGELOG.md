@@ -21,11 +21,12 @@ and a thread's; they are the tools of the read server, `xippios-google-mail-mcp-
 and routes of the FastAPI router. Five write tasks store and delete a draft, send a
 message, change a message's labels and move a message to the trash; each previews and
 changes nothing unless it is called with `confirm=True`, and they are the tools of a
-server of their own, `xippios-google-mail-mcp-write`, never routes. Either server serves
-streamable HTTP on a loopback host only unless `--allow-remote` is passed, since neither
-carries authentication. The client keeps a self-imposed pace of 60 requests a minute per
-account. The documentation snapshot of 2026-10-29 under `docs/upstream/`, Gmail's
-discovery document among it, is the reference for names and semantics.
+server of their own, `xippios-google-mail-mcp-write`, never routes. Either server runs on
+stdio by default and, over `--http`, serves streamable HTTP on a loopback host only unless
+`--allow-remote` is passed, since neither carries authentication. The client keeps a
+self-imposed pace of 60 requests a minute per account. The documentation snapshot of
+2026-10-29 under `docs/upstream/`, Gmail's discovery document among it, is the reference
+for names and semantics.
 
 ### Added
 
@@ -78,10 +79,11 @@ discovery document among it, is the reference for names and semantics.
 - Endpoint wrappers for `users.labels.list`, `users.messages.list`, `users.messages.get`,
   `users.threads.get` and `users.messages.attachments.get`, the last without a task, and
   faithful models of their answers, the whole MIME tree of a message among them.
-- The read server's entry point is `xippios-google-mail-mcp-read`, since the write
-  server has an entry point of its own (decision of 2026-10-29). It is served over
-  `--http` on a loopback `--host` only, unless `--allow-remote` is passed: it reaches
-  every declared mailbox and carries no authentication.
+- The read server's entry point is `xippios-google-mail-mcp-read`, as the family names
+  the servers of a source with a write server; the write server has an entry point of
+  its own. It is served over `--http` on a loopback `--host` only, unless
+  `--allow-remote` is passed: it reaches every declared mailbox and carries no
+  authentication.
 - `--account <name>` binds either server, the read or the write one, to one account:
   every tool acts on it and takes no `account`.
 - The write tools, on a server of their own, `xippios-google-mail-mcp-write`, which
