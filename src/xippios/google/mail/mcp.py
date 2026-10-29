@@ -5,7 +5,7 @@ names, which core skips: the server is passed ``tasks.__all__`` whole (ADR-0019)
 logic lives here (ADR-0001). Entry point: ``xippios-google-mail-mcp-read``, the read
 server; ``--account <name>`` binds it to one account (``_cli``, ``_account_lock``), and
 ``--http`` serves it on a loopback ``--host`` only, unless ``--allow-remote`` is passed
-(ADR-0025, D-a).
+(ADR-0025, D-a). The write tools are ``mcp_write.py``'s, on a server of their own.
 """
 
 from mcp.server.mcpserver import MCPServer

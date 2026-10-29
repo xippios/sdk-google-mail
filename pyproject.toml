@@ -28,6 +28,7 @@ testing = ["xippios-core[testing]~=0.3.0"]
 
 [project.scripts]
 xippios-google-mail-mcp-read = "xippios.google.mail.mcp:run"
+xippios-google-mail-mcp-write = "xippios.google.mail.mcp_write:run"
 xippios-google-mail-auth = "xippios.google.mail._consent:run"
 
 [project.urls]

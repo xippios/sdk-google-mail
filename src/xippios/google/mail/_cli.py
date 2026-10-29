@@ -20,10 +20,12 @@ account its environment declares.
 The read server reaches every declared mailbox and carries no authentication, so it is
 held to loopback as core holds a write server (ADR-0025, D-a): ``--http`` on a ``--host``
 other than ``127.0.0.1``, ``localhost`` or ``::1`` without ``--allow-remote`` is refused
-with ``ConfigError`` before anything is built, exit status 2. A write server is left to
-core's ``main``, which applies the same rule to it. Core's ``build_server`` and ``main``
-keep httpx's request lines out of the log (``quiet_request_logging``). The HTTP router has
-no lock: a deployment that needs one declares only that account.
+with ``ConfigError`` before anything is built, exit status 2. A write server
+(``mcp_write``, ``is_write_server``) is left to core's ``main``, which applies its own
+rule to it, with its own message: for the write server ``locked`` binds ``--account``
+alone. Core's ``build_server`` and ``main`` keep httpx's request lines out of the log
+(``quiet_request_logging``). The HTTP router has no lock: a deployment that needs one
+declares only that account.
 """
 
 import argparse
