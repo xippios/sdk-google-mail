@@ -435,7 +435,8 @@ def test_an_unscrubbed_message_is_refused(recorder: ModuleType) -> None:
     leaks = recorder.check(recorder.to_json(raw), raw, SECRETS)
     assert leaks == [
         "an e-mail address other than user@example.com",
-        "a <...@...> other than <n@example.com> and <user@example.com>",
+        "a <...@...> other than <n@example.com> and <user@example.com>, in the fixture's "
+        "text and a decoded body.data",
         "a MIME header outside the allowlist (ARC-Seal, Content-Disposition, "
         "Content-Transfer-Encoding, DKIM-Signature, Received, X-Google-Smtp-Source)",
         "a raw field, a whole message",
@@ -461,3 +462,57 @@ def test_an_answer_the_message_step_leaves_alone_keeps_upstream_s_text(
 ) -> None:
     text = '{\n  "labels": [\n    {\n      "id": "INBOX"\n    }\n  ]\n}\n'
     assert recorder.MessageScrub().body(text) == text
+
+
+def test_a_link_in_angle_brackets_is_no_message_id(recorder: ModuleType) -> None:
+    """A plain-text mail writes its links ``<https://...>``; one may carry an address."""
+    text = "Check it: <https://accounts.example/alert?Email=bob@corp.example.org&x=1>\r\n"
+    body = {"size": len(text), "data": b64url(text)}
+    message = made_up_message(
+        payload={"partId": "", "mimeType": "text/plain", "filename": "", "body": body}
+    )
+    fixture = scrubbed(recorder, message_exchange(message))
+    data = json.loads(fixture.response.body)["payload"]["body"]["data"]
+    assert "Email=user@example.com&x=1>" in unb64url(data).decode()
+    assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == []
+
+
+def test_an_unnumbered_id_in_a_decoded_body_is_refused_by_where(recorder: ModuleType) -> None:
+    text = "In-Reply-To: <abc.123@localhost>\r\n"
+    message = made_up_message(
+        payload={
+            "partId": "",
+            "mimeType": "text/plain",
+            "filename": "",
+            "body": {"data": b64url(text)},
+        }
+    )
+    fixture = scrubbed(recorder, message_exchange(message))
+    assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == [
+        "a <...@...> other than <n@example.com> and <user@example.com>, in a decoded body.data"
+    ]
+
+
+def test_a_profile_picture_url_is_redacted(recorder: ModuleType) -> None:
+    """A security notice shows the avatar of the account it names: it identifies a person."""
+    avatar = "https://lh3.googleusercontent.com/a/ACg8ocMadeUpAvatarId=s96-c"
+    page = f'<img src="{avatar}" alt=""><p>bob@corp.example.org</p>'
+    message = made_up_message(
+        snippet=f"see {avatar}",
+        payload={
+            "partId": "",
+            "mimeType": "text/html",
+            "filename": "",
+            "body": {"data": b64url(page)},
+        },
+    )
+    raw = fixture_from_response(message_exchange(message))
+    assert "a Google account's profile-picture URL" in recorder.check(
+        recorder.to_json(raw), raw, SECRETS
+    )
+    fixture = scrubbed(recorder, message_exchange(message))
+    scrubbed_message = json.loads(fixture.response.body)
+    page_after = unb64url(scrubbed_message["payload"]["body"]["data"]).decode()
+    assert 'src="https://lh3.googleusercontent.com/a/REDACTED"' in page_after
+    assert scrubbed_message["snippet"] == "see https://lh3.googleusercontent.com/a/REDACTED"
+    assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == []

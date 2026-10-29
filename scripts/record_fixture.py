@@ -92,6 +92,9 @@ investigation's §2.7 list for messages and threads, numbering within the one fi
 - every ``attachmentId``, in the body and in an ``/attachments/<id>`` path, becomes
   ``att-<n>``;
 - a ``raw`` field, a whole message as text, is dropped: it is never recorded;
+- a Google account's profile-picture URL (``https://lh3.googleusercontent.com/a/...``),
+  which a security notice shows beside the account it names, becomes ``.../a/REDACTED``
+  in a body and in every string, since it identifies the person whose address went;
 - every other string of the answer has its addresses made ``user@example.com``, so a
   ``snippet`` keeps none and no address beside a JSON escape (Google may write ``<`` as
   one) is cut through by the text rewrite.
@@ -103,7 +106,8 @@ string of a JSON body and every decoded ``body.data`` for what must never be wri
 the secret values in any of those forms, Google's token shapes (``ya29.``, ``1//``,
 ``GOCSPX-``, ``apps.googleusercontent.com``), also percent-decoded, an address other than
 ``user@example.com``, a ``<...@...>`` other than ``<n@example.com>`` and
-``<user@example.com>``, a token field whose value is not ``REDACTED``, a part's header
+``<user@example.com>``, a profile-picture URL, a token field whose value is not
+``REDACTED``, a part's header
 outside the allowlist, an ``attachmentId`` that is not ``att-<n>`` and a ``raw`` field.
 Any of them means nothing is written and the exit status is 1; a refusal names what,
 never a value. Only the status, the method, the scrubbed URL and the quota units are
@@ -309,8 +313,13 @@ _ALLOWED = frozenset(name.lower() for name in HEADER_ALLOWLIST)
 MESSAGE_ID_HEADERS = frozenset({"message-id", "in-reply-to", "references"})
 """The headers whose ids become ``<n@example.com>``, lower-cased."""
 _ANGLED = re.compile(r"<[^<>]*>")
-MESSAGE_ID_SHAPE = re.compile(r"<[^<>\s@]+@[^<>\s]+>")
-"""A ``<local@domain>``, the shape of a Message-ID and of an address in angle brackets."""
+MESSAGE_ID_SHAPE = re.compile(r"<(?![A-Za-z][A-Za-z0-9+.-]*:)[^<>\s@]+@[^<>\s]+>")
+"""A ``<local@domain>``, the shape of a Message-ID and of an address in angle brackets.
+
+A URI in angle brackets (``<https://...?Email=user@example.com>``, ``<mailto:...>``), as
+a plain-text mail writes its links, is no Message-ID: its address is the address
+check's.
+"""
 _KEPT_ANGLED = re.compile(r"<(?:\d+@example\.com|user@example\.com)>")
 """The two ``<...@...>`` a fixture may hold: a numbered id and the scrubbed address."""
 _ATTACHMENT_ID = re.compile(r"att-\d+")
@@ -355,7 +364,7 @@ class MessageScrub:
             raw = _b64url_decode(data)
         except binascii.Error:
             return data  # not base64url: check() still reads the text as it is
-        text = scrub_emails(raw.decode("utf-8", "surrogateescape"))
+        text = scrub_avatars(scrub_emails(raw.decode("utf-8", "surrogateescape")))
         encoded = base64.urlsafe_b64encode(text.encode("utf-8", "surrogateescape")).decode()
         return encoded if data.endswith("=") else encoded.rstrip("=")
 
@@ -370,7 +379,7 @@ class MessageScrub:
         if isinstance(node, list):
             return [self.node(item) for item in node]
         if isinstance(node, str):
-            return scrub_emails(node)
+            return scrub_avatars(scrub_emails(node))
         if not isinstance(node, dict):
             return node
         scrubbed: dict[str, Any] = {}
@@ -509,6 +518,17 @@ def forms_of(value: str) -> list[str]:
 def _secret_pattern(secrets: Sequence[str]) -> re.Pattern[str] | None:
     forms = sorted({form for value in secrets for form in forms_of(value)}, key=len, reverse=True)
     return re.compile("|".join(re.escape(form) for form in forms)) if forms else None
+
+
+AVATAR = re.compile(
+    r"(?P<head>https?://lh\d+\.googleusercontent\.com/a-?/)(?!REDACTED)[^\"'\s()<>&]+"
+)
+"""A Google account's profile-picture URL, its id after ``/a/``; ``REDACTED`` is kept."""
+
+
+def scrub_avatars(text: str) -> str:
+    """``text`` with every profile-picture URL's id made ``REDACTED``."""
+    return AVATAR.sub(lambda match: f"{match['head']}{REDACTED}", text)
 
 
 NUMBERED_ID = re.compile(r"\d+@example\.com")
@@ -655,6 +675,7 @@ def check(text: str, fixture: Fixture, secrets: Sequence[str]) -> list[str]:
     texts = [text]
     decoded: Any = None
     message_leaks: list[str] = []
+    bodies: list[str] = []
     if not fixture.response.body_base64:
         try:
             decoded = json.loads(fixture.response.body)
@@ -662,8 +683,9 @@ def check(text: str, fixture: Fixture, secrets: Sequence[str]) -> list[str]:
             decoded = None
         texts.extend(_strings(decoded))
         message_leaks, bodies = _message_leaks(decoded, fixture.request.url)
-        texts.extend(bodies)
-    texts.extend([unquote_plus(item) for item in texts])  # a form body's or a query's
+    unquoted = [unquote_plus(item) for item in texts]  # a form body's or a query's
+    decoded_bodies = [*bodies, *(unquote_plus(item) for item in bodies)]
+    texts = [*texts, *unquoted, *decoded_bodies]
     leaks: list[str] = []
     pattern = _secret_pattern(secrets)
     if pattern is not None and any(pattern.search(item) for item in texts):
@@ -675,9 +697,25 @@ def check(text: str, fixture: Fixture, secrets: Sequence[str]) -> list[str]:
     addresses = {address for address in addresses if not NUMBERED_ID.fullmatch(address)}
     if addresses - {SCRUBBED_EMAIL, SCRUBBED_EMAIL.replace("@", "%40")}:
         leaks.append("an e-mail address other than user@example.com")
-    angled = {m.group(0) for item in texts for m in MESSAGE_ID_SHAPE.finditer(item)}
-    if any(not _KEPT_ANGLED.fullmatch(value) for value in angled):
-        leaks.append("a <...@...> other than <n@example.com> and <user@example.com>")
+    angled_in = [
+        where
+        for where, searched in (
+            ("the fixture's text", [*texts[: len(texts) - len(decoded_bodies)]]),
+            ("a decoded body.data", decoded_bodies),
+        )
+        if any(
+            not _KEPT_ANGLED.fullmatch(match.group(0))
+            for item in searched
+            for match in MESSAGE_ID_SHAPE.finditer(item)
+        )
+    ]
+    if any(AVATAR.search(item) for item in texts):
+        leaks.append("a Google account's profile-picture URL")
+    if angled_in:
+        leaks.append(
+            "a <...@...> other than <n@example.com> and <user@example.com>, in "
+            + " and ".join(angled_in)
+        )
     left = sorted(set(_token_fields_left(decoded)))
     if left:
         leaks.append(f"a value under {', '.join(left)}")
