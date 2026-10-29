@@ -33,7 +33,7 @@ src/xippios/google/mail/
   api/             endpoint wrappers, one module per upstream operation
   tasks.py         task functions; __all__ is what the adapters register, but BULK_TASKS,
                    the Python-only ones; MCP_CAPS any per-tool result caps
-  mcp.py           xippios-google-mail-mcp entry point
+  mcp.py           the read server's entry point, xippios-google-mail-mcp-read
   http.py          FastAPI router
   params.py        the packaged reference lists, read from reference/
   enums.py         StrEnums (IntEnums for integer ids) generated from the packaged lists;
@@ -72,7 +72,7 @@ package, and so is `src/xippios/google/`, the provider level.
 ```bash
 uv run pytest -m live --tb=short   # needs XIPPIOS_LIVE_TESTS=1
 
-uv run xippios-google-mail-mcp   # stdio; add --http for streamable HTTP
+uv run xippios-google-mail-mcp-read   # stdio; add --http for streamable HTTP
 ```
 
 `.github/workflows/live.yml` runs the live tests nightly at 02:37 UTC, a time derived from

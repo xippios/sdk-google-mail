@@ -12,3 +12,6 @@ All notable changes to this project are documented here. The format follows
   client for Gmail, empty task layer, MCP server and FastAPI router
   wired to it, test harness with core's family check, CI, the nightly live tests and
   the release train, in which a release PR's merge tags and publishes.
+- The read server's entry point is `xippios-google-mail-mcp-read`, since a write
+  server with an entry point of its own follows in this release (decision of
+  2026-10-29).

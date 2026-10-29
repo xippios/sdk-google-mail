@@ -34,7 +34,7 @@ Task functions are listed in the status table below as they are added.
   "mcpServers": {
     "google-mail": {
       "command": "uvx",
-      "args": ["--from", "xippios-google-mail[mcp]", "xippios-google-mail-mcp"]
+      "args": ["--from", "xippios-google-mail[mcp]", "xippios-google-mail-mcp-read"]
     }
   }
 }
