@@ -4,29 +4,59 @@ Every live test takes the ``demo_account`` fixture: live runs reach the demo acc
 a throwaway gmail.com mailbox, with ``GOOGLE_DEMO_REFRESH_TOKEN`` and the OAuth client pair
 from the environment (``.github/workflows/live.yml`` passes the three org secrets). They
 assert shapes and counts, never a raw payload or the mailbox's address, since pytest's
-assertion introspection prints what an ``assert`` compares into a public log. The calls of
-one run, 242 quota units (``docs/upstream/pages/quota.md``): one token request per
-test, which costs no quota; ``users.getProfile`` 1; ``labels.list`` 1; ``messages.list``
-5, three times (the list, and an id each for the message and the thread); the search of
-two messages, 5 + 2 x 20; ``messages.get`` with ``format=full`` 60; ``threads.get`` with
-``format=full`` 120. ``list_accounts`` sends nothing.
+assertion introspection prints what an ``assert`` compares into a public log: a check on
+the address is a boolean named first.
+
+The write tasks need demo's write grant (``gmail.modify``) and are tested in two
+sequences under the write safety rule (the briefing's "Write safety"): demo writes to
+itself only, its own address read from ``users.getProfile`` at runtime (``own_address``),
+never written down; ``self_addressed`` refuses, before any write, a To, Cc or Bcc other
+than that address or a Subject without ``MARK``, ``xippios-live``. Each sequence sweeps
+first: the marked messages an earlier run left outside the trash and the drafts are
+trashed (``sweep``; a leftover draft is not reachable by its draft id without
+``drafts.list``, which 0.1.0 does not wrap, so drafts stay out of the sweep). Then it
+creates, reads back with ``get_message`` and deletes the draft or trashes the message
+through the task, and in a ``finally`` through the wrapper should an assertion fail
+first. The draft sequence previews, creates, reads back and deletes one draft; the
+message sequence sends one message, reads it back, previews a reply to it (the
+original's metadata read), stars and unstars it with two modifies and trashes it.
+
+The calls of one run, 544 quota units (``docs/upstream/pages/quota.md``) with nothing to
+sweep: one token request per test, which costs no quota; the reads, 242:
+``users.getProfile`` 1; ``labels.list`` 1; ``messages.list`` 5, three times (the list,
+and an id each for the message and the thread); the search of two messages, 5 + 2 x 20;
+``messages.get`` with ``format=full`` 60; ``threads.get`` with ``format=full`` 120;
+``list_accounts`` sends nothing; the writes, 302: per sequence ``users.getProfile`` 1 and
+the sweep's search 5 (20 more and a trash, 20, per leftover); the draft's create 10,
+read-back 60 and delete 10; the message's send 100, read-back 60, reply preview 20, two
+modifies 5 each and trash 20.
 """
 
 from datetime import timedelta
+from email.utils import getaddresses
 
 import pytest
+from xippios.core import sync
 
-from xippios.google.mail import tasks
-from xippios.google.mail._decode import HEADERS
+from xippios.google.mail import api, tasks, tasks_write
+from xippios.google.mail._client import client_for
+from xippios.google.mail._decode import HEADERS, header_value
 from xippios.google.mail.models import (
+    ComposePreview,
     DecodedMessage,
+    Draft,
+    DraftDeleted,
     Label,
     ListMessagesResponse,
+    Message,
     Profile,
     SearchRow,
 )
 
 KEPT = {name.lower() for name in HEADERS}
+MARK = "xippios-live"
+"""The marker in the Subject of every message a live test writes, and the sweep's query."""
+BODY = "Written by the xippios-google-mail live tests, to this mailbox itself."
 
 pytestmark = pytest.mark.live
 
@@ -108,3 +138,133 @@ def test_get_thread_decodes_its_messages(demo_account: str) -> None:
     assert all(isinstance(view, DecodedMessage) and view.html is None for view in result.data)
     assert all(view.thread_id == thread_id for view in result.data)
     assert (result.meta.request["start"], result.meta.endpoint) == (0, "gmail.users.threads.get")
+
+
+# The write tasks, under the write safety rule ----------------------------------------
+
+
+def self_addressed(
+    own: str,
+    *,
+    to: list[str],
+    subject: str,
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+) -> None:
+    """The write safety rule, before any write: demo writes to itself, with the marker.
+
+    Args:
+        own: Demo's own address, as ``users.getProfile`` answered it at runtime.
+        to: The To addresses of the message about to be written.
+        subject: Its Subject.
+        cc: Its Cc addresses.
+        bcc: Its Bcc addresses.
+
+    Raises:
+        ValueError: ``to`` is empty, an address of ``to``, ``cc`` or ``bcc`` is not
+            ``own`` (compared without regard to case, a display name allowed), or the
+            subject lacks ``MARK``; the message names the parameter, never an address.
+    """
+    if not to:
+        raise ValueError("to names no address; demo writes to itself")
+    for name, values in (("to", to), ("cc", cc), ("bcc", bcc)):
+        for value in values or []:
+            found = getaddresses([value])
+            if len(found) != 1 or found[0][1].lower() != own.lower():
+                raise ValueError(f"{name} holds an address other than demo's own")
+    if MARK not in subject:
+        raise ValueError(f"the subject carries no {MARK}")
+
+
+@pytest.fixture
+def own_address(demo_account: str) -> str:
+    """Demo's own address, read at runtime (``users.getProfile``, 1 unit), never written down."""
+    return tasks.get_profile(demo_account).data.email_address
+
+
+def sweep(account: str) -> int:
+    """Trash every marked message an earlier run left, drafts aside; how many it trashed.
+
+    ``search_messages`` leaves the trash and spam out, and a found message is trashed
+    only when its Subject carries ``MARK``: the search's words are no proof.
+    """
+    found = tasks.search_messages(account, f'subject:"{MARK}" -in:drafts', max_results=50).data
+    trash = sync(api.messages_trash)
+    left = [row.id for row in found if MARK in (row.subject or "")]
+    for message_id in left:
+        trash(client_for(account), message_id)
+    return len(left)
+
+
+def subject_of(view: DecodedMessage) -> str | None:
+    return header_value(view.headers, "Subject")
+
+
+def test_a_draft_to_demo_itself_is_created_read_back_and_deleted(
+    demo_account: str, own_address: str
+) -> None:
+    sweep(demo_account)
+    to, subject = [own_address], f"{MARK} draft"
+    self_addressed(own_address, to=to, subject=subject)
+    preview = tasks_write.create_draft(demo_account, to, subject, BODY)
+    assert isinstance(preview.data, ComposePreview)
+    assert preview.data.performed is False
+    self_addressed(own_address, to=to, subject=subject)
+    created = tasks_write.create_draft(demo_account, to, subject, BODY, confirm=True)
+    draft = created.data
+    assert isinstance(draft, Draft)
+    deleted = False
+    try:
+        assert draft.message is not None
+        assert "DRAFT" in draft.message.label_ids
+        view = tasks.get_message(demo_account, draft.message.id).data
+        assert subject_of(view) == subject
+        to_self = own_address.lower() in (header_value(view.headers, "To") or "").lower()
+        assert to_self, "the draft is addressed to demo itself"
+        assert (view.text or "").strip() == BODY
+        result = tasks_write.delete_draft(demo_account, draft.id, confirm=True)
+        assert result.data == DraftDeleted(id=draft.id)
+        deleted = True
+    finally:
+        if not deleted:
+            sync(api.drafts_delete)(client_for(demo_account), draft.id)
+
+
+def test_a_message_to_demo_itself_is_sent_read_back_relabelled_and_trashed(
+    demo_account: str, own_address: str
+) -> None:
+    sweep(demo_account)
+    to, subject = [own_address], f"{MARK} send"
+    self_addressed(own_address, to=to, subject=subject)
+    sent = tasks_write.send_message(demo_account, to, subject, BODY, confirm=True).data
+    assert isinstance(sent, Message)
+    trashed = False
+    try:
+        assert "SENT" in sent.label_ids
+        view = tasks.get_message(demo_account, sent.id).data
+        assert subject_of(view) == subject
+        names = {header.name.lower() for header in view.headers}
+        assert {"from", "date", "message-id"} <= names, "Gmail sets From, Date and Message-ID"
+        reply = tasks_write.create_draft(demo_account, to, "", BODY, in_reply_to_message_id=sent.id)
+        assert isinstance(reply.data, ComposePreview)
+        shown = {header.name: header.value for header in reply.data.headers}
+        assert shown["Subject"] == f"Re: {subject}"
+        assert shown["In-Reply-To"] == header_value(view.headers, "Message-ID")
+        assert reply.data.thread_id == sent.thread_id
+        starred = tasks_write.modify_message(
+            demo_account, sent.id, add_label_ids=["STARRED"], confirm=True
+        ).data
+        assert isinstance(starred, Message)
+        assert "STARRED" in starred.label_ids
+        unstarred = tasks_write.modify_message(
+            demo_account, sent.id, remove_label_ids=["STARRED"], confirm=True
+        ).data
+        assert isinstance(unstarred, Message)
+        assert "STARRED" not in unstarred.label_ids
+        result = tasks_write.trash_message(demo_account, sent.id, confirm=True).data
+        assert isinstance(result, Message)
+        assert "TRASH" in result.label_ids
+        trashed = True
+    finally:
+        if not trashed:
+            sync(api.messages_trash)(client_for(demo_account), sent.id)
