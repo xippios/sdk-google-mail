@@ -1,4 +1,4 @@
-"""Record one exchange of the demo account into a fixture (``/record-fixture``).
+"""Record one exchange, or every exchange a task makes, of the demo account (``/record-fixture``).
 
 Run from the repository root with demo's refresh token and the OAuth client pair
 (``GOOGLE_DEMO_REFRESH_TOKEN``, ``GOOGLE_CLIENT_ID``, ``GOOGLE_CLIENT_SECRET``) in the
@@ -12,9 +12,28 @@ With ``R`` for ``direnv exec ~/github/sdk uv run scripts/record_fixture.py``::
     R get_profile unauthenticated --garbage-bearer
     R messages_list one maxResults=1
     R messages_modify insufficient_permissions id=<a message id>
+    R list_labels ok
+    R list_messages ok max_results=2
+    R list_messages query q=newer_than:1y
+    R list_messages label label_ids=INBOX
+    R search_messages ok q=newer_than:1y max_results=2
+    R get_message ok message_id=<a message id>
+    R get_thread ok thread_id=<its thread id>
 
 ``<operation>`` names the wrapper the fixture belongs to, the directory of conventions
-§10: the fixture lands at ``tests/fixtures/<operation>/<case>.json``. ``OPERATIONS`` maps
+§10: the fixture lands at ``tests/fixtures/<operation>/<case>.json``. A read task's name
+in its place (``TASKS``) records through the task itself: ``key=value`` arguments are the
+task's own parameters (``q``, ``max_results``, ``message_id``; a list parameter such as
+``label_ids`` repeated, a flag ``true`` or ``false``), the account is demo, and every
+Gmail exchange the task makes is written under the task's name (conventions §10: a
+fixture recorded through a task lives under the task's name), the first as
+``<task>/<case>.json`` and the k-th, from the second on, as ``<task>/<case>_<k>.json``:
+``search_messages ok`` writes the list as ``ok.json`` and the two ``format=metadata``
+calls as ``ok_2.json`` and ``ok_3.json``. The task's client is the recorder's: it is put
+into the registry as demo's (``TENANTS.client_for(DEMO, ...)``), so the task's
+``client_for("demo")`` returns it, and its ``observe`` hook keeps each response. The
+token request runs inside the auth flow, unseen by the hook; ``oauth2_token/ok.json``
+replays it. ``OPERATIONS`` maps
 each Gmail operation to its method and path under ``BASE_URL`` and counts its quota units
 (``docs/upstream/pages/quota.md``); ``oauth2_token`` is the refresh request of
 ``RefreshTokenAuth`` (``token_form``), sent to ``https://oauth2.googleapis.com/token`` as
@@ -57,40 +76,85 @@ one is still there as given. Then the recorder's own step (``rewrite``, ADR-0024
 - every e-mail address, in the URL, the response headers and both bodies, ``@`` plain or
   ``%40``, becomes ``user@example.com``, the profile's ``emailAddress`` among them.
 
-The investigation's §2.7 list comes with the message tasks (``Message-ID``, ``In-Reply-To``
-and ``References`` to ``<n@example.com>``, ``payload.headers`` cut to an allowlist, every
-``data`` decoded, scrubbed and re-encoded, ``attachmentId`` to ``att-<n>``): they extend
-``TEXT_REWRITES`` and ``rewrite``. Last, before the one write, ``check`` searches the
-fixture's text and every decoded string of a JSON body for what must never be written:
+Before those text rewrites, ``MessageScrub`` reads a JSON answer as JSON, the
+investigation's §2.7 list for messages and threads, numbering within the one fixture:
+
+- every part's ``headers``, at any depth of the MIME tree, are cut to ``HEADER_ALLOWLIST``
+  (From, To, Cc, Bcc, Date, Subject, Message-ID, In-Reply-To, References, Content-Type,
+  MIME-Version, compared without regard to case), so ``Received``, ``ARC-*``,
+  ``DKIM-Signature`` and ``X-Google-*`` with their hosts, addresses and signatures go;
+- each ``<...>`` of a ``Message-ID``, ``In-Reply-To`` or ``References`` value becomes
+  ``<n@example.com>``, the same id the same ``n`` (a reply's ``In-Reply-To`` names the
+  number its parent's ``Message-ID`` got);
+- in an address header (``ADDRESS_HEADERS``: From, To, Cc, Bcc, Reply-To, Sender, on
+  every part), each ``Name <addr>`` or ``"Name" <addr>`` becomes ``User
+  <user@example.com>``, an ``<addr>`` without a name ``<user@example.com>`` and a bare
+  ``addr`` ``user@example.com``, the separators kept: a display name identifies its
+  person as the address does (``scrub_display_names``); Reply-To and Sender are not on
+  the allowlist, so they go before the rule reaches them, unless the list grows;
+- every ``body.data`` is base64url decoded, its addresses made ``user@example.com``
+  (bytes that are not UTF-8 kept as they came) and encoded again in upstream's padding,
+  ``size`` left as served;
+- every ``attachmentId``, in the body and in an ``/attachments/<id>`` path, becomes
+  ``att-<n>``;
+- a ``raw`` field, a whole message as text, is dropped: it is never recorded;
+- a Google account's profile-picture URL (``https://lh3.googleusercontent.com/a/...``),
+  which a security notice shows beside the account it names, becomes ``.../a/REDACTED``
+  in a body and in every string, since it identifies the person whose address went;
+- every other string of the answer has its addresses made ``user@example.com``, so a
+  ``snippet`` keeps none and no address beside a JSON escape (Google may write ``<`` as
+  one) is cut through by the text rewrite.
+
+Message and thread ids are kept: replay matches the path. A JSON answer the step changed
+is written again as JSON (two-space indent, UTF-8), one it left alone as upstream sent
+it. Last, before the one write, ``check`` searches the fixture's text, every decoded
+string of a JSON body and every decoded ``body.data`` for what must never be written:
 the secret values in any of those forms, Google's token shapes (``ya29.``, ``1//``,
 ``GOCSPX-``, ``apps.googleusercontent.com``), also percent-decoded, an address other than
-``user@example.com``, and a token field whose value is not ``REDACTED``. Any of them
-means nothing is written and the exit status is 1; a refusal names what, never a value.
-Only the status, the method, the scrubbed URL and the quota units are printed.
+``user@example.com``, a ``<...@...>`` other than ``<n@example.com>`` and
+``<user@example.com>``, a profile-picture URL, a token field whose value is not
+``REDACTED``, a part's header
+outside the allowlist, an ``attachmentId`` that is not ``att-<n>`` and a ``raw`` field.
+Any of them means nothing is written and the exit status is 1; a refusal names what,
+never a value. Only the status, the method, the scrubbed URL and the quota units are
+printed.
 """
 
 import argparse
+import base64
+import binascii
 import dataclasses
+import inspect
 import json
 import os
 import re
 import sys
-from collections.abc import Callable, Generator, Iterator, Sequence
+import types
+import typing
+from collections.abc import Awaitable, Callable, Generator, Iterator, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 from urllib.parse import parse_qsl, quote, quote_plus, unquote_plus, urlencode
 
 import httpx
-from xippios.core import AsyncClient, RetryPolicy, sync
+from xippios.core import AsyncClient, RetryPolicy, XippiosError, sync
 from xippios.core.testing import REDACTED, Fixture, Scrub, fixture_from_response, fixture_path
 
+from xippios.google.mail import tasks
 from xippios.google.mail._auth import (
     CLIENT_ID_ENV,
     CLIENT_SECRET_ENV,
     TOKEN_URL,
     RefreshTokenAuth,
 )
-from xippios.google.mail._client import DEMO, TENANTS, account_config, client_for, refresh_auth
+from xippios.google.mail._client import (
+    BASE_URL,
+    DEMO,
+    TENANTS,
+    account_config,
+    client_for,
+    refresh_auth,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -134,6 +198,91 @@ OPERATIONS = {
 }
 """The Gmail operations, by the wrapper (fixture directory) they belong to."""
 
+TASKS: dict[str, Callable[..., Awaitable[Any]]] = {
+    "list_labels": tasks.list_labels_async,
+    "list_messages": tasks.list_messages_async,
+    "search_messages": tasks.search_messages_async,
+    "get_message": tasks.get_message_async,
+    "get_thread": tasks.get_thread_async,
+}
+"""The read tasks recorded through themselves, by name (fixture directory); module doc."""
+
+
+def units_of(url: str) -> int | None:
+    """The quota units of a Gmail GET at ``url`` (``quota.md``); ``None`` for another path.
+
+    ``messages.get`` costs 20, 60 with ``format`` ``full`` (its default) or ``raw``;
+    ``threads.get`` 40, 120 with ``format`` ``full`` (its default).
+    """
+    parsed = httpx.URL(url)
+    base = httpx.URL(BASE_URL).path + "/"
+    if not parsed.path.startswith(base):
+        return None
+    segments = parsed.path.removeprefix(base).split("/")
+    form = parsed.params.get("format", "full")
+    match segments:
+        case ["profile"] | ["labels"]:
+            return 1
+        case ["messages"]:
+            return 5
+        case ["messages", _]:
+            return 60 if form in ("full", "raw") else 20
+        case ["threads", _]:
+            return 120 if form == "full" else 40
+        case ["messages", _, "attachments", _]:
+            return 20
+    return None
+
+
+def _kind(annotation: Any) -> Any:
+    """``str``, ``int``, ``bool`` or ``list`` for a task parameter's annotation."""
+    if isinstance(annotation, types.UnionType):
+        (annotation,) = [arg for arg in typing.get_args(annotation) if arg is not type(None)]
+    return typing.get_origin(annotation) or annotation
+
+
+def task_arguments(name: str, pairs: Sequence[tuple[str, str]]) -> dict[str, Any]:
+    """The keyword arguments of task ``name`` from ``key=value`` pairs, typed by its signature.
+
+    A ``list`` parameter collects its repeated pairs, a ``bool`` takes ``true`` or
+    ``false``, an ``int`` digits; ``account`` is never one, the recorder's account is demo.
+
+    Raises:
+        ValueError: An unknown or repeated parameter, a value of the wrong kind or a
+            required parameter missing.
+    """
+    fn = TASKS[name]
+    hints = typing.get_type_hints(fn)
+    parameters = {key: p for key, p in inspect.signature(fn).parameters.items() if key != "account"}
+    values: dict[str, Any] = {}
+    for key, raw in pairs:
+        if key not in parameters:
+            raise ValueError(f"{name} takes {', '.join(parameters) or 'no parameter'}, not {key}")
+        kind = _kind(hints[key])
+        if kind is list:
+            values.setdefault(key, []).append(raw)
+        elif key in values:
+            raise ValueError(f"{key} is given twice")
+        elif kind is bool:
+            if raw not in ("true", "false"):
+                raise ValueError(f"{key} is true or false")
+            values[key] = raw == "true"
+        elif kind is int:
+            if not raw.isdigit():
+                raise ValueError(f"{key} is a whole number")
+            values[key] = int(raw)
+        else:
+            values[key] = raw
+    missing = [
+        key
+        for key, parameter in parameters.items()
+        if parameter.default is inspect.Parameter.empty and key not in values
+    ]
+    if missing:
+        raise ValueError(f"{name} needs {', '.join(f'{key}=' for key in missing)}")
+    return values
+
+
 SCRUBBED_EMAIL = "user@example.com"
 EMAIL = re.compile(r"[\w.+-]+(?P<at>@|%40)[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}")
 """An e-mail-shaped string, ``@`` plain or percent-encoded (a query string)."""
@@ -152,15 +301,179 @@ TOKEN_SHAPES = {
 }
 """Google's credential shapes, refused wherever they appear."""
 
+HEADER_ALLOWLIST = (
+    "From",
+    "To",
+    "Cc",
+    "Bcc",
+    "Date",
+    "Subject",
+    "Message-ID",
+    "In-Reply-To",
+    "References",
+    "Content-Type",
+    "MIME-Version",
+)
+"""The MIME headers a fixture keeps, on every part, compared without regard to case."""
+_ALLOWED = frozenset(name.lower() for name in HEADER_ALLOWLIST)
+MESSAGE_ID_HEADERS = frozenset({"message-id", "in-reply-to", "references"})
+"""The headers whose ids become ``<n@example.com>``, lower-cased."""
+ADDRESS_HEADERS = frozenset({"from", "to", "cc", "bcc", "reply-to", "sender"})
+"""The headers whose display names become ``User``, lower-cased."""
+_NAMED_ADDRESS = re.compile(
+    r'(?P<lead>^|,)(?P<space>\s*)(?P<name>"(?:[^"\\]|\\.)*"|[^,<>"]*?)\s*<[^<>]*>'
+)
+"""One ``name <addr>`` of an address list: a quoted name, which may hold a comma, or a
+plain one, then the address in angle brackets; ``lead`` the comma before it, if any."""
+
+
+def scrub_display_names(value: str) -> str:
+    """An address header's value with every name and address made the placeholder's.
+
+    ``Alice <a@x.org>, "Doe, John" <j@y.org>, <c@z.org>, d@w.org`` becomes ``User
+    <user@example.com>, User <user@example.com>, <user@example.com>, d@w.org``, whose
+    bare address the address scrub then makes ``user@example.com``. A value without an
+    angle-bracketed address is returned as given.
+    """
+
+    def named(match: re.Match[str]) -> str:
+        name = match["name"].strip()
+        address = f"<{SCRUBBED_EMAIL}>" if name in ("", '""') else f"User <{SCRUBBED_EMAIL}>"
+        return f"{match['lead']}{match['space']}{address}"
+
+    return _NAMED_ADDRESS.sub(named, value)
+
+
+_ANGLED = re.compile(r"<[^<>]*>")
+MESSAGE_ID_SHAPE = re.compile(r"<(?![A-Za-z][A-Za-z0-9+.-]*:)[^<>\s@]+@[^<>\s]+>")
+"""A ``<local@domain>``, the shape of a Message-ID and of an address in angle brackets.
+
+A URI in angle brackets (``<https://...?Email=user@example.com>``, ``<mailto:...>``), as
+a plain-text mail writes its links, is no Message-ID: its address is the address
+check's.
+"""
+_KEPT_ANGLED = re.compile(r"<(?:\d+@example\.com|user@example\.com)>")
+"""The two ``<...@...>`` a fixture may hold: a numbered id and the scrubbed address."""
+_ATTACHMENT_ID = re.compile(r"att-\d+")
+_ATTACHMENT_PATH = re.compile(r"(?P<head>/attachments/)(?P<id>[^/?#]+)")
+
+
+def _b64url_decode(data: str) -> bytes:
+    """``data`` decoded as base64url, its padding restored; ``binascii.Error`` if it is not."""
+    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+
+class MessageScrub:
+    """The §2.7 list for one fixture's JSON: headers, ids, bodies, attachments (module doc).
+
+    One instance per fixture, so a Message-ID and an attachment id get the same number
+    wherever they appear in it, the URL included.
+    """
+
+    def __init__(self) -> None:
+        self._message_ids: dict[str, int] = {}
+        self._attachment_ids: dict[str, int] = {}
+
+    def message_id(self, value: str) -> str:
+        """``<n@example.com>`` for ``value``, an id in angle brackets, numbered from 1."""
+        number = self._message_ids.setdefault(value, len(self._message_ids) + 1)
+        return f"<{number}@example.com>"
+
+    def attachment_id(self, value: str) -> str:
+        """``att-<n>`` for ``value``, an attachment id, numbered from 1."""
+        number = self._attachment_ids.setdefault(value, len(self._attachment_ids) + 1)
+        return f"att-{number}"
+
+    def header_value(self, value: str) -> str:
+        """A Message-ID, In-Reply-To or References value with each id numbered."""
+        if _ANGLED.search(value):
+            return _ANGLED.sub(lambda match: self.message_id(match.group(0)), value)
+        return self.message_id(value.strip()) if value.strip() else value
+
+    def data(self, data: str) -> str:
+        """A ``body.data``: decoded, its addresses scrubbed, encoded in upstream's padding."""
+        try:
+            raw = _b64url_decode(data)
+        except binascii.Error:
+            return data  # not base64url: check() still reads the text as it is
+        text = scrub_avatars(scrub_emails(raw.decode("utf-8", "surrogateescape")))
+        encoded = base64.urlsafe_b64encode(text.encode("utf-8", "surrogateescape")).decode()
+        return encoded if data.endswith("=") else encoded.rstrip("=")
+
+    def url(self, url: str) -> str:
+        """``url`` with an ``/attachments/<id>`` segment made ``att-<n>``."""
+        return _ATTACHMENT_PATH.sub(
+            lambda match: match["head"] + self.attachment_id(match["id"]), url
+        )
+
+    def node(self, node: Any) -> Any:
+        """A decoded JSON value, scrubbed (the module docstring's list)."""
+        if isinstance(node, list):
+            return [self.node(item) for item in node]
+        if isinstance(node, str):
+            return scrub_avatars(scrub_emails(node))
+        if not isinstance(node, dict):
+            return node
+        scrubbed: dict[str, Any] = {}
+        for key, value in node.items():
+            if key == "raw":
+                continue  # a whole message as base64url text: never recorded
+            if key == "headers" and _is_header_list(value):
+                scrubbed[key] = [self.header(item) for item in value if _allowed(item)]
+            elif key == "data" and isinstance(value, str):
+                scrubbed[key] = self.data(value)
+            elif key == "attachmentId" and isinstance(value, str):
+                scrubbed[key] = self.attachment_id(value)
+            else:
+                scrubbed[key] = self.node(value)
+        return scrubbed
+
+    def header(self, item: dict[str, Any]) -> dict[str, Any]:
+        """One kept MIME header: its ids numbered, its names and addresses scrubbed."""
+        value = item.get("value")
+        name = str(item["name"]).lower()
+        if isinstance(value, str) and name in MESSAGE_ID_HEADERS:
+            return {**item, "value": self.header_value(value)}
+        if isinstance(value, str) and name in ADDRESS_HEADERS:
+            item = {**item, "value": scrub_display_names(value)}
+        return {key: self.node(field) for key, field in item.items()}
+
+    def body(self, body: str) -> str:
+        """A JSON answer scrubbed and written again; any other text, or one unchanged, as is."""
+        try:
+            decoded = json.loads(body)
+        except ValueError:
+            return body
+        scrubbed = self.node(decoded)
+        if scrubbed == decoded:
+            return body
+        return json.dumps(scrubbed, indent=2, ensure_ascii=False) + "\n"
+
+
+def _is_header_list(value: Any) -> TypeGuard[list[dict[str, Any]]]:
+    """A MIME part's ``headers``: a list of ``{"name": ..., "value": ...}`` objects."""
+    return isinstance(value, list) and all(
+        isinstance(item, dict) and isinstance(item.get("name"), str) for item in value
+    )
+
+
+def _allowed(item: dict[str, Any]) -> bool:
+    return str(item["name"]).lower() in _ALLOWED
+
 
 def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     """The command line: operation, case, parameters and the modes."""
     parser = argparse.ArgumentParser(
         prog="record_fixture.py",
-        description="Record one exchange of the demo account as a test fixture.",
+        description=(
+            "Record one exchange, or every exchange a task makes, of the demo account as "
+            "test fixtures."
+        ),
     )
     parser.add_argument(
-        "operation", help=f"{TOKEN} or a Gmail operation: {', '.join(sorted(OPERATIONS))}"
+        "operation",
+        help=f"{TOKEN}, a Gmail operation ({', '.join(sorted(OPERATIONS))}) or a read task "
+        f"({', '.join(sorted(TASKS))})",
     )
     parser.add_argument("case", help="fixture name, e.g. ok")
     parser.add_argument(
@@ -181,15 +494,29 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         help="a Gmail operation: a nonsense bearer and no refresh",
     )
     args = parser.parse_intermixed_args(argv)
-    if args.operation != TOKEN and args.operation not in OPERATIONS:
-        parser.error(f"operation {args.operation!r}: use {TOKEN} or one of {sorted(OPERATIONS)}")
+    if args.operation != TOKEN and args.operation not in OPERATIONS | TASKS.keys():
+        parser.error(
+            f"operation {args.operation!r}: use {TOKEN}, one of {sorted(OPERATIONS)} or a task "
+            f"of {sorted(TASKS)}"
+        )
     if not _CASE.fullmatch(args.case):
         parser.error(f"case {args.case!r}: use lower-case letters, digits and underscores")
     if any("=" not in item for item in args.params):
         parser.error("parameters are key=value")
-    args.params = {key: value for key, _, value in (item.partition("=") for item in args.params)}
+    pairs = [(key, value) for key, _, value in (item.partition("=") for item in args.params)]
+    args.params = dict(pairs)
     if "account" in args.params:
         parser.error("the recorder records the demo account only; account is not a parameter")
+    if args.operation in TASKS:
+        if args.garbage_token or args.garbage_client or args.garbage_bearer:
+            parser.error(
+                "a task records under demo's own grant; the --garbage modes are not for it"
+            )
+        try:
+            args.task_arguments = task_arguments(args.operation, pairs)
+        except ValueError as refused:
+            parser.error(str(refused))
+        return args
     if args.operation == TOKEN and (args.garbage_bearer or args.params):
         parser.error(f"{TOKEN} takes no parameters and no --garbage-bearer")
     if args.operation != TOKEN and (args.garbage_token or args.garbage_client):
@@ -231,12 +558,33 @@ def _secret_pattern(secrets: Sequence[str]) -> re.Pattern[str] | None:
     return re.compile("|".join(re.escape(form) for form in forms)) if forms else None
 
 
+AVATAR = re.compile(
+    r"(?P<head>https?://lh\d+\.googleusercontent\.com/a-?/)(?!REDACTED)[^\"'\s()<>&]+"
+)
+"""A Google account's profile-picture URL, its id after ``/a/``; ``REDACTED`` is kept."""
+
+
+def scrub_avatars(text: str) -> str:
+    """``text`` with every profile-picture URL's id made ``REDACTED``."""
+    return AVATAR.sub(lambda match: f"{match['head']}{REDACTED}", text)
+
+
+NUMBERED_ID = re.compile(r"\d+@example\.com")
+"""The address part of a scrubbed Message-ID, ``<n@example.com>``, which stays as it is."""
+
+
+def _scrubbed_email(match: re.Match[str]) -> str:
+    if NUMBERED_ID.fullmatch(match.group(0)):
+        return match.group(0)
+    return SCRUBBED_EMAIL.replace("@", match["at"]) if match["at"] else SCRUBBED_EMAIL
+
+
 def scrub_emails(text: str) -> str:
-    """``text`` with every e-mail address made ``user@example.com`` (``%40`` kept as such)."""
-    return EMAIL.sub(
-        lambda match: SCRUBBED_EMAIL.replace("@", match["at"]) if match["at"] else SCRUBBED_EMAIL,
-        text,
-    )
+    """``text`` with every e-mail address made ``user@example.com`` (``%40`` kept as such).
+
+    A scrubbed Message-ID's ``n@example.com`` is no address and is left alone.
+    """
+    return EMAIL.sub(_scrubbed_email, text)
 
 
 def scrub_token_fields(text: str) -> str:
@@ -245,7 +593,7 @@ def scrub_token_fields(text: str) -> str:
 
 
 TEXT_REWRITES: tuple[Callable[[str], str], ...] = (scrub_token_fields, scrub_emails)
-"""The text rewrites of every location, after the secrets; the message tasks add theirs."""
+"""The text rewrites of every location, after the secrets and ``MessageScrub``."""
 
 
 def scrub_form(body: str) -> str:
@@ -255,8 +603,14 @@ def scrub_form(body: str) -> str:
 
 
 def rewrite(fixture: Fixture, secrets: Sequence[str]) -> Fixture:
-    """The recorder's own step on core's ``Fixture``: the module docstring's list."""
+    """The recorder's own step on core's ``Fixture``: the module docstring's list.
+
+    ``MessageScrub`` reads the response body as JSON first, one instance for the
+    fixture's URL and body, then the secrets in their encoded forms and
+    ``TEXT_REWRITES`` run over every location.
+    """
     pattern = _secret_pattern(secrets)
+    messages = MessageScrub()
 
     def text(value: str) -> str:
         if pattern is not None:
@@ -274,11 +628,17 @@ def rewrite(fixture: Fixture, secrets: Sequence[str]) -> Fixture:
     response = fixture.response
     return fixture.model_copy(
         update={
-            "request": request.model_copy(update={"url": text(request.url), "body": body}),
+            "request": request.model_copy(
+                update={"url": text(messages.url(request.url)), "body": body}
+            ),
             "response": response.model_copy(
                 update={
                     "headers": [(name, text(value)) for name, value in response.headers],
-                    "body": response.body if response.body_base64 else text(response.body),
+                    "body": (
+                        response.body
+                        if response.body_base64
+                        else text(messages.body(response.body))
+                    ),
                 }
             ),
         }
@@ -310,17 +670,60 @@ def _token_fields_left(node: Any) -> Iterator[str]:
             yield from _token_fields_left(item)
 
 
+def _objects(node: Any) -> Iterator[dict[str, Any]]:
+    """Every object of a decoded JSON value, outermost first."""
+    if isinstance(node, dict):
+        yield node
+        for value in node.values():
+            yield from _objects(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _objects(item)
+
+
+def _message_leaks(decoded: Any, url: str) -> tuple[list[str], list[str]]:
+    """The §2.7 refusals of a decoded JSON answer, and the text of its decoded bodies."""
+    leaks: list[str] = []
+    bodies: list[str] = []
+    outside: set[str] = set()
+    for item in _objects(decoded):
+        if "raw" in item:
+            leaks.append("a raw field, a whole message")
+        headers = item.get("headers")
+        if _is_header_list(headers):
+            outside.update(h["name"] for h in headers if not _allowed(h))
+        data = item.get("data")
+        if isinstance(data, str):
+            try:
+                bodies.append(_b64url_decode(data).decode("utf-8", "surrogateescape"))
+            except binascii.Error:
+                bodies.append(data)
+        attachment = item.get("attachmentId")
+        if isinstance(attachment, str) and not _ATTACHMENT_ID.fullmatch(attachment):
+            leaks.append("an attachmentId that is not att-<n>")
+    if outside:
+        leaks.append(f"a MIME header outside the allowlist ({', '.join(sorted(outside))})")
+    if any(not _ATTACHMENT_ID.fullmatch(m["id"]) for m in _ATTACHMENT_PATH.finditer(url)):
+        leaks.append("an attachment id in the path that is not att-<n>")
+    return sorted(set(leaks)), bodies
+
+
 def check(text: str, fixture: Fixture, secrets: Sequence[str]) -> list[str]:
     """What the fixture would leak, by name, never by value; empty when it may be written."""
     texts = [text]
     decoded: Any = None
+    message_leaks: list[str] = []
+    bodies: list[str] = []
     if not fixture.response.body_base64:
         try:
             decoded = json.loads(fixture.response.body)
         except ValueError:
             decoded = None
         texts.extend(_strings(decoded))
-    texts.extend([unquote_plus(item) for item in texts])  # a form body's or a query's
+        message_leaks, bodies = _message_leaks(decoded, fixture.request.url)
+    unquoted = [unquote_plus(item) for item in texts]  # a form body's or a query's
+    decoded_bodies = [*bodies, *(unquote_plus(item) for item in bodies)]
+    texts = [*texts, *unquoted, *decoded_bodies]
     leaks: list[str] = []
     pattern = _secret_pattern(secrets)
     if pattern is not None and any(pattern.search(item) for item in texts):
@@ -329,12 +732,32 @@ def check(text: str, fixture: Fixture, secrets: Sequence[str]) -> list[str]:
         if any(shape in item for item in texts):
             leaks.append(what)
     addresses = {match.group(0) for item in texts for match in EMAIL.finditer(item)}
+    addresses = {address for address in addresses if not NUMBERED_ID.fullmatch(address)}
     if addresses - {SCRUBBED_EMAIL, SCRUBBED_EMAIL.replace("@", "%40")}:
         leaks.append("an e-mail address other than user@example.com")
+    angled_in = [
+        where
+        for where, searched in (
+            ("the fixture's text", [*texts[: len(texts) - len(decoded_bodies)]]),
+            ("a decoded body.data", decoded_bodies),
+        )
+        if any(
+            not _KEPT_ANGLED.fullmatch(match.group(0))
+            for item in searched
+            for match in MESSAGE_ID_SHAPE.finditer(item)
+        )
+    ]
+    if any(AVATAR.search(item) for item in texts):
+        leaks.append("a Google account's profile-picture URL")
+    if angled_in:
+        leaks.append(
+            "a <...@...> other than <n@example.com> and <user@example.com>, in "
+            + " and ".join(angled_in)
+        )
     left = sorted(set(_token_fields_left(decoded)))
     if left:
         leaks.append(f"a value under {', '.join(left)}")
-    return leaks
+    return leaks + message_leaks
 
 
 _CUT_MARKS = ("truncated", "original_bytes", "original_count", "sha256")
@@ -362,18 +785,31 @@ class _Bearer(httpx.Auth):
         yield request
 
 
-def recording_client(auth: httpx.Auth) -> AsyncClient:
+def recording_client(
+    auth: httpx.Auth, *, keep: Callable[[httpx.Response], None] | None = None
+) -> AsyncClient:
     """The client the recorder sends through: the demo account's, never retrying.
 
     ``client_for("demo")`` checks that the account is declared; its configuration
     (``account_config``: base URL, pace, ``classify``, quota policy) is rebuilt on the
     recorder's own auth with ``RetryPolicy(max_attempts=1)``, since core's ``record`` takes
-    no ``retry=``.
+    no ``retry=``. ``keep``, a task recording's, is called with every response from the
+    wire after the quota policy's own ``observe``.
     """
     client_for(DEMO)
     signer = auth if isinstance(auth, RefreshTokenAuth) else refresh_auth(DEMO)
     config = account_config(signer)
-    return AsyncClient(dataclasses.replace(config, retry=RetryPolicy(max_attempts=1)), auth=auth)
+    observe = config.observe
+    if keep is not None:
+        policy, kept = observe, keep
+
+        def observe(response: httpx.Response) -> None:
+            if policy is not None:
+                policy(response)
+            kept(response)
+
+    config = dataclasses.replace(config, retry=RetryPolicy(max_attempts=1), observe=observe)
+    return AsyncClient(config, auth=auth)
 
 
 async def exchange_async(args: argparse.Namespace) -> tuple[httpx.Response, int]:
@@ -414,10 +850,82 @@ async def exchange_async(args: argparse.Namespace) -> tuple[httpx.Response, int]
 exchange = sync(exchange_async)
 
 
+async def task_exchanges_async(name: str, arguments: dict[str, Any]) -> list[httpx.Response]:
+    """Run task ``name`` for demo through the recorder's client; every Gmail response.
+
+    The registry is emptied and handed the recorder's client as demo's
+    (``TENANTS.client_for``), so the task's own ``client_for("demo")`` returns it; the
+    recording refuses to run if it does not.
+
+    Raises:
+        RuntimeError: The task would not use the recorder's client.
+        XippiosError: The task's own error; the responses before it are not written.
+    """
+    responses: list[httpx.Response] = []
+    client = recording_client(refresh_auth(DEMO), keep=responses.append)
+    TENANTS.reset()
+    if TENANTS.client_for(DEMO, lambda _name: client) is not client or (
+        client_for(DEMO) is not client
+    ):
+        raise RuntimeError("the task would not send through the recorder's client")
+    await TASKS[name](DEMO, **arguments)
+    return responses
+
+
+task_exchanges = sync(task_exchanges_async)
+
+
+def _units(url: str) -> str:
+    units = units_of(url)
+    return "" if units is None else f" ({units} quota unit{'s' if units != 1 else ''})"
+
+
+def record_task(args: argparse.Namespace) -> int:
+    """Record every Gmail exchange of a read task, each checked before any is written."""
+    try:
+        responses = task_exchanges(args.operation, args.task_arguments)
+    except XippiosError as error:  # its message names the method and path, never a value
+        print(f"nothing written: {args.operation} raised {type(error).__name__}: {error}")  # noqa: T201
+        return 1
+    for response in responses:
+        spent = _units(str(response.request.url))
+        print(f"sent: {response.request.method} {response.status_code}{spent}")  # noqa: T201
+    if not responses:
+        print(f"nothing written: {args.operation} sent no Gmail request")  # noqa: T201
+        return 1
+    files: list[tuple[Path, str, Fixture]] = []
+    for index, response in enumerate(responses, start=1):
+        case = args.case if index == 1 else f"{args.case}_{index}"
+        path = fixture_path(FIXTURES, args.operation, case)
+        secrets = [*secret_values(), *answer_tokens(response)]
+        try:
+            fixture = rewrite(
+                fixture_from_response(response, scrub=Scrub(secrets=secrets)), secrets
+            )
+        except ValueError as refused:  # names what and where, never a value
+            print(f"nothing written: {path.relative_to(ROOT)}: {refused}")  # noqa: T201
+            return 1
+        text = to_json(fixture)
+        leaks = check(text, fixture, secrets)
+        if leaks:
+            where = path.relative_to(ROOT)
+            print(f"nothing written: {where} would contain " + "; ".join(leaks))  # noqa: T201
+            return 1
+        files.append((path, text, fixture))
+    for path, text, fixture in files:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        line = f"{fixture.response.status} {fixture.request.method} {fixture.request.url}"
+        print(f"{line} -> {path.relative_to(ROOT)}")  # noqa: T201
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Record, scrub in memory, check, write; return the exit status."""
     args = parse_args(argv)
     os.environ.pop(TENANTS.list_var, None)  # the recorder sees the demo account only
+    if args.operation in TASKS:
+        return record_task(args)
     path = fixture_path(FIXTURES, args.operation, args.case)
     response, units = exchange(args)
     secrets = [*secret_values(), *answer_tokens(response)]

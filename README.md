@@ -39,7 +39,18 @@ from xippios.google.mail import tasks
 tasks.list_accounts().data  # ["work", "private"]
 result = tasks.get_profile("work")
 result.data.messages_total, result.meta.tenant, result.meta.retrieved_at
+
+found = tasks.search_messages("work", "from:alice@example.com newer_than:7d", max_results=5)
+[(row.from_, row.subject, row.date) for row in found.data]
+message = tasks.get_message("work", found.data[0].id).data
+message.headers, message.text, message.attachments  # the decoded view; html on request
 ```
+
+`q` is Gmail's own search syntax, sent as given. `get_message` returns a decoded view of
+the message: its From, To, Cc, Bcc, Date, Subject, Message-ID, In-Reply-To and References
+headers, the first plain-text part decoded, the first HTML part with `include_html=True`,
+and its attachments' names, types and sizes, never their content. `get_thread` returns
+the same view of each message in a thread, as text.
 
 Task functions are listed in the status table below as they are added.
 
@@ -58,6 +69,11 @@ Task functions are listed in the status table below as they are added.
 
 Tools are read-only and named `google_mail_<verb>_<noun>`. Results are capped, at
 200 rows or 64 KB unless a tool has a cap of its own, with a note on how to see the rest.
+`google_mail_search_messages` reads at most 50 messages a call (a list and one call per
+message, 5 + 20 quota units each), and `google_mail_get_thread` reads a long thread in
+parts with `start` and `limit`: a cut answer ends with where to resume.
+`google_mail_get_message` returns a message over the cap as its first 64 KB with a note:
+`include_html=False` leaves the HTML out, and the rest is read in a mail client.
 `--account <name>` binds the server to one account: every tool acts on it and takes no
 `account`. `--http` serves streamable HTTP instead of stdio, on a loopback `--host` only
 (`127.0.0.1`, `localhost`, `::1`): the server reaches every declared mailbox and carries no
@@ -75,6 +91,11 @@ exactly tasks.__all__. -->
 | --- | --- | --- | --- |
 | none: the declared accounts | `list_accounts` | `google_mail_list_accounts` | available; names only, no request |
 | `GET gmail/v1/users/{userId}/profile` (`users.getProfile`) | `get_profile(account)` | `google_mail_get_profile` | available; `userId` `me`, the account's own |
+| `GET gmail/v1/users/{userId}/labels` (`users.labels.list`) | `list_labels(account)` | `google_mail_list_labels` | available; the label ids `label_ids` takes |
+| `GET gmail/v1/users/{userId}/messages` (`users.messages.list`) | `list_messages(account, q=None, label_ids=None, max_results=None, page_token=None, include_spam_trash=False)` | `google_mail_list_messages` | available; ids only, one page; `q` in Gmail's search syntax, verbatim; `result_size_estimate` upstream's estimate, `meta.total` `None` |
+| `users.messages.list`, then `GET gmail/v1/users/{userId}/messages/{id}` (`users.messages.get`, `format=metadata`) per id | `search_messages(account, q, label_ids=None, max_results=20)` | `google_mail_search_messages` | available; From, Subject, Date and snippet per message; `max_results` at most 50 (5 + 20 quota units a message) |
+| `GET gmail/v1/users/{userId}/messages/{id}` (`users.messages.get`, `format=full`) | `get_message(account, message_id, include_html=False)` | `google_mail_get_message` | available; the decoded view: nine headers, the plain text, the HTML on request, the attachments' metadata (no content) |
+| `GET gmail/v1/users/{userId}/threads/{id}` (`users.threads.get`, `format=full`) | `get_thread(account, thread_id, start=0, limit=None)` | `google_mail_get_thread` | available; each message's decoded view, text only; `start` and `limit` read a long thread in parts |
 
 ## Upstream terms and attribution
 

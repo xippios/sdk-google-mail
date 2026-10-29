@@ -38,10 +38,19 @@ src/xippios/google/mail/
   _consent.py      xippios-google-mail-auth, the loopback PKCE consent that prints a
                    refresh token once
   errors.py        the package's own error classes, where conventions §5 calls for one
-  models.py        pydantic models mirroring upstream payloads (UpstreamModel)
-  api/             endpoint wrappers, one module per upstream operation
+  models.py        pydantic models mirroring upstream payloads (UpstreamModel): the
+                   faithful read models (Label, ListMessagesResponse, Message with its
+                   MIME tree, Thread, ...) and the projections the tasks return
+                   (DecodedMessage and its Attachment, SearchRow)
+  _decode.py       decode_message, the decoded view of a message's MIME tree (ADR-0025)
+  api/             endpoint wrappers, one module per upstream operation, named by its
+                   method id minus the shared gmail.users. (conventions §2): get_profile,
+                   labels_list, messages_list, messages_get, threads_get and
+                   messages_attachments_get, the last without a task in 0.1.0
   tasks.py         task functions; __all__ is what the adapters register, but BULK_TASKS,
-                   the Python-only ones; MCP_CAPS any per-tool result caps
+                   the Python-only ones; MCP_CAPS the per-tool result caps (the notes of
+                   get_message and get_thread, the default bounds); SEARCH_MAX_RESULTS,
+                   search_messages' bound
   mcp.py           the read server's entry point, xippios-google-mail-mcp-read; build(lock)
   http.py          FastAPI router
   params.py        the packaged reference lists, read from reference/
@@ -52,12 +61,18 @@ scripts/
   refresh_reference.py   fetches the packaged lists through api/ and regenerates enums.py
   refresh_upstream.py    captures docs/upstream/ and writes FETCHED.md (/refresh-upstream): the
                          discovery document, its keys sorted, and seven pages as Markdown
-  record_fixture.py      records one exchange of the demo account into tests/fixtures/,
+  record_fixture.py      records one exchange of the demo account, or every exchange of
+                         a read task run for demo, into tests/fixtures/,
                          scrubbed and checked before the one write (/record-fixture)
 tests/
-  conftest.py      enables xippios.core.testing.plugin, which keeps the run offline, and
-                   strips every account but demo at import (queue row 281)
-  fixtures/        recorded responses, <endpoint>/<case>.json, never hand-written
+  conftest.py      enables xippios.core.testing.plugin, which keeps the run offline,
+                   strips every account but demo at import (queue row 281), and holds a
+                   session-wide write audit hook (sys.addaudithook, off behind a
+                   threading.Event) that watches open and the file-system events for the
+                   tests that take its no_writes fixture
+  fixtures/        recorded responses, never hand-written: <wrapper>/<case>.json, or
+                   <task>/<case>.json for an exchange recorded through a task (conventions
+                   §10), the k-th exchange of one recording <task>/<case>_<k>.json
   test_family.py   core's family check, one line: namespace levels, py.typed, __version__,
                    the adapters serving exactly the tasks, task shapes and docstrings, the
                    README status table, the template tag, the core bound
@@ -70,6 +85,9 @@ tests/
   test_auth.py     RefreshTokenAuth: the refresh, the 401 retry, the refusals, no disk
   test_account_lock.py  the --account lock and the loopback rule
   test_consent.py  the consent tool, offline
+  test_tasks_messages.py  the read tasks on labels, messages and threads: replays, MCP
+                   calls, the search bound, the thread's slice and cut note, and the decoder's
+                   rules on messages built in memory
   test_record_fixture.py  the recorder's scrub step and check, offline
   test_live.py     @pytest.mark.live smoke tests, one per task, against demo only
 docs/upstream/     documentation snapshot and FETCHED.md
@@ -98,6 +116,8 @@ uv run xippios-google-mail-mcp-read --account demo   # bound to one account
 xippios-google-mail-auth --account demo   # --scopes read by default; a consent: the operator's step
 
 direnv exec ~/github/sdk uv run scripts/record_fixture.py get_profile ok   # demo only
+direnv exec ~/github/sdk uv run scripts/record_fixture.py search_messages ok \
+  q=newer_than:1y max_results=2   # through the task: ok.json, ok_2.json, ok_3.json
 ```
 
 `.github/workflows/live.yml` runs the live tests nightly at 02:37 UTC, a time derived from
@@ -123,8 +143,48 @@ hand: `scripts/record_fixture.py` records through `client_for("demo")` only, wit
 `Scrub(secrets=...)` naming demo's refresh token, the client secret and the client id,
 then its own step (encoded forms, token fields by key, every address to
 `user@example.com`), and checks for Google's token shapes (`ya29.`, `1//`, `GOCSPX-`,
-`apps.googleusercontent.com`) before the one write. Grep every fixture for those shapes
-and for addresses before committing it.
+`apps.googleusercontent.com`) before the one write. A message or thread answer is read as
+JSON first (`MessageScrub`, the investigation's §2.7 list): every part's headers cut to
+From, To, Cc, Bcc, Date, Subject, Message-ID, In-Reply-To, References, Content-Type and
+MIME-Version, so `Received`, `ARC-*`, `DKIM-Signature` and `X-Google-*` go; each id of a
+Message-ID, In-Reply-To or References value numbered `<n@example.com>` within the
+fixture; in From, To, Cc, Bcc, Reply-To and Sender, on every part, each `Name <addr>` or
+`"Name" <addr>` made `User <user@example.com>`, a bare address `user@example.com`, since
+a display name identifies its person as the address does (the four fixtures recorded
+before the rule, `get_message/ok`, `get_thread/ok`, `search_messages/ok_2` and
+`search_messages/ok_3`, keep the sender name "Google"); every `body.data` decoded, its
+addresses scrubbed and encoded again, `size` as served; `attachmentId` to `att-<n>` in
+the body and the path; a profile-picture URL (`lh3.googleusercontent.com/a/...`, shown
+beside the account a security notice names) to `.../a/REDACTED`; `raw` dropped; message
+and thread ids kept, since replay matches the path. A read task's name records through
+the task, each Gmail exchange under the task's name (`ok.json`, then `ok_2.json`, ...).
+Grep every fixture, its decoded `body.data` included, for those shapes and for addresses
+before committing it. detect-secrets reads a `body.data` as a Base64 High Entropy String
+(F18): a fixture that carries one needs an audited `.secrets.baseline` entry.
+
+### The decoded view
+
+`get_message` makes one `messages.get` call with `format=full` and returns a
+`DecodedMessage`, the decoded view of ADR-0025 ("The decoded view"), built by
+`_decode.decode_message`: decoding the MIME tree is parsing a value, conventions §3's one
+permitted override, and the view picks the parts by MIME role; the faithful tree stays on
+the wrapper's `Message.payload`. `headers` keeps the top-level part's From, To, Cc, Bcc,
+Date, Subject, Message-ID, In-Reply-To and References, compared without regard to case,
+in upstream's order, name and value as given; `text` is the first `text/plain` part that
+is no attachment, `html` the first `text/html` one, on request only (`include_html`);
+a body is base64url decoded and read in its `Content-Type` charset, else UTF-8, with
+U+FFFD for what that cannot read. A part with a `filename` or a `body.attachmentId` is an
+attachment: `attachments` lists its `part_id`, `filename`, `mime_type`, `size` and
+`attachment_id`, never its content, and the walk does not descend into it. Over the result cap a
+message, no list, comes back as the result's first 64 KB and a note of the tool's own
+(`MCP_CAPS["get_message"]`): its text or html is cut, `include_html=False` gives the text
+alone, and no `start` resumes it (ADR-0025, ADR-0016). `get_thread`
+returns the views of a thread's messages, text only, from `start`, at most `limit`, and
+records `start` in `meta.request`, so core's cut note ends `; resume with start=<start +
+shown>` (conventions §8). `search_messages` reads at most 50 messages (`SEARCH_MAX_RESULTS`,
+in the task for every caller, ADR-0001): a list and one `format=metadata` call per id, 5 +
+20 units each, 1,005 for 50. No task reports `meta.total`: Gmail's `resultSizeEstimate` is
+an estimate, kept as a data field of `list_messages` (ADR-0012).
 
 ### Accounts, scopes and errors
 

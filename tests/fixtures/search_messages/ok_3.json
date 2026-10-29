@@ -1,0 +1,57 @@
+{
+  "recorded_at": "2026-10-29T13:54:02.724595Z",
+  "request": {
+    "body": null,
+    "body_base64": false,
+    "content_type": null,
+    "method": "GET",
+    "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages/1a187146c1f83c87?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date"
+  },
+  "response": {
+    "body": "{\n  \"id\": \"1a187146c1f83c87\",\n  \"threadId\": \"1a187146c1f83c87\",\n  \"labelIds\": [\n    \"UNREAD\",\n    \"INBOX\"\n  ],\n  \"snippet\": \"Die Telefonnummer zur Kontowiederherstellung wurde ge\u00e4ndert user@example.com Die Telefonnummer zur Wiederherstellung Ihres Kontos wurde ge\u00e4ndert. Falls Sie die \u00c4nderung nicht selbst vorgenommen\",\n  \"payload\": {\n    \"mimeType\": \"multipart/alternative\",\n    \"headers\": [\n      {\n        \"name\": \"Date\",\n        \"value\": \"Thu, 29 Oct 2026 09:53:43 GMT\"\n      },\n      {\n        \"name\": \"Subject\",\n        \"value\": \"Sicherheitswarnung\"\n      },\n      {\n        \"name\": \"From\",\n        \"value\": \"Google <user@example.com>\"\n      }\n    ]\n  },\n  \"sizeEstimate\": 12794,\n  \"historyId\": \"1297\",\n  \"internalDate\": \"1793267623000\"\n}\n",
+    "body_base64": false,
+    "headers": [
+      [
+        "content-type",
+        "application/json; charset=UTF-8"
+      ],
+      [
+        "vary",
+        "Origin"
+      ],
+      [
+        "vary",
+        "X-Origin"
+      ],
+      [
+        "vary",
+        "Referer"
+      ],
+      [
+        "date",
+        "Thu, 29 Oct 2026 13:54:01 GMT"
+      ],
+      [
+        "server",
+        "ESF"
+      ],
+      [
+        "x-xss-protection",
+        "0"
+      ],
+      [
+        "x-frame-options",
+        "SAMEORIGIN"
+      ],
+      [
+        "x-content-type-options",
+        "nosniff"
+      ],
+      [
+        "alt-svc",
+        "h3=\":443\"; ma=2592000,h3-29=\":443\"; ma=2592000"
+      ]
+    ],
+    "status": 200
+  }
+}

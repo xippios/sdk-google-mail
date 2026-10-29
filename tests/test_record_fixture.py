@@ -2,9 +2,11 @@
 
 ``scripts/record_fixture.py`` is no package module, so it is loaded from its path. The
 values below are made up in the shapes Google's credentials take (``1//``, ``GOCSPX-``,
-``ya29.``); none is a credential.
+``ya29.``); none is a credential. The messages are made up in memory in the shape of the
+discovery document's ``Message`` (``format=full``): they test the scrubber, not a fixture.
 """
 
+import base64
 import importlib.util
 import json
 import os
@@ -56,7 +58,7 @@ def refresh_exchange() -> httpx.Response:
 
 def profile_exchange() -> httpx.Response:
     request = httpx.Request("GET", "https://gmail.googleapis.com/gmail/v1/users/me/profile")
-    body = {"emailAddress": "someone.else@gmail.com", "messagesTotal": 3}
+    body = {"emailAddress": "someone.else@example.org", "messagesTotal": 3}
     return httpx.Response(200, json=body, request=request)
 
 
@@ -120,6 +122,14 @@ def test_forms_of_a_secret_cover_the_encodings(recorder: ModuleType) -> None:
         ["messages_modify", "refused", "id=abc", "addLabelIds=X"],
         ["threads_get", "ok"],
         ["get_profile", "Bad-Case"],
+        ["get_message", "ok"],
+        ["get_message", "ok", "message_id=a", "message_id=b"],
+        ["search_messages", "ok", "q=x", "max_results=two"],
+        ["search_messages", "ok", "q=x", "include_html=true"],
+        ["get_thread", "ok", "thread_id=t", "start=-1"],
+        ["get_message", "ok", "message_id=m", "include_html=yes"],
+        ["list_labels", "ok", "account=work"],
+        ["list_labels", "ok", "--garbage-bearer"],
     ],
 )
 def test_the_command_line_refuses_what_it_does_not_record(
@@ -194,3 +204,409 @@ def test_without_demo_the_recorder_sends_nothing(
         recorder.main(["get_profile", "ok"])
     assert not respx_mock.calls
     assert not (tmp_path / "fixtures").exists()
+
+
+# Message scrub and task recordings ----------------------------------------------------
+
+
+def test_a_task_s_arguments_are_typed_by_its_signature(recorder: ModuleType) -> None:
+    args = recorder.parse_args(
+        ["list_messages", "label", "label_ids=INBOX", "label_ids=UNREAD", "max_results=2"]
+    )
+    assert args.task_arguments == {"label_ids": ["INBOX", "UNREAD"], "max_results": 2}
+    args = recorder.parse_args(["get_message", "ok", "message_id=abc", "include_html=true"])
+    assert args.task_arguments == {"message_id": "abc", "include_html": True}
+    assert recorder.parse_args(["list_labels", "ok"]).task_arguments == {}
+
+
+@pytest.mark.parametrize(
+    ("url", "units"),
+    [
+        ("profile", 1),
+        ("labels", 1),
+        ("messages?maxResults=2", 5),
+        ("messages/abc?format=metadata&metadataHeaders=From", 20),
+        ("messages/abc?format=full", 60),
+        ("messages/abc", 60),
+        ("threads/abc?format=full", 120),
+        ("threads/abc?format=minimal", 40),
+        ("messages/abc/attachments/att-1", 20),
+        ("drafts", None),
+    ],
+)
+def test_the_units_of_a_call_follow_the_quota_page(
+    recorder: ModuleType, url: str, units: int | None
+) -> None:
+    assert recorder.units_of(f"https://gmail.googleapis.com/gmail/v1/users/me/{url}") == units
+
+
+def b64url(text: str, charset: str = "utf-8") -> str:
+    """Base64url without padding, as the made-up bodies below are encoded."""
+    return base64.urlsafe_b64encode(text.encode(charset)).decode().rstrip("=")
+
+
+def unb64url(data: str) -> bytes:
+    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+
+ATTACHMENT = "ANGjdJ8made-up-attachment-id_0123456789"  # pragma: allowlist secret
+
+
+def made_up_message(**overrides: Any) -> dict[str, Any]:
+    """A ``format=full`` message as upstream shapes it, with everything §2.7 scrubs."""
+    plain = "Hi,\r\nwrite to bob@corp.example.org or <bob@corp.example.org>.\r\n"
+    html = '<p>Hi, <a href="mailto:bob@corp.example.org">Bob</a></p>'
+    message = {
+        "id": "18f0000000000007",
+        "threadId": "18f0000000000007",
+        "labelIds": ["INBOX", "UNREAD"],
+        "snippet": "Hi, write to bob@corp.example.org",
+        "historyId": "1353",
+        "internalDate": "1761746531000",
+        "sizeEstimate": 5120,
+        "raw": b64url("From: alice@corp.example.org"),
+        "payload": {
+            "partId": "",
+            "mimeType": "multipart/mixed",
+            "filename": "",
+            "headers": [
+                {"name": "Received", "value": "from mx.corp.example.org (203.0.113.7)"},
+                {"name": "DKIM-Signature", "value": "v=1; a=rsa-sha256; d=corp.example.org"},
+                {"name": "ARC-Seal", "value": "i=1; a=rsa-sha256; cv=none"},
+                {"name": "X-Google-Smtp-Source", "value": "AGHT+made-up"},
+                {"name": "MIME-Version", "value": "1.0"},
+                {"name": "From", "value": "Alice Example <alice@corp.example.org>"},
+                {"name": "Date", "value": "Thu, 29 Oct 2026 14:02:11 +0100"},
+                {"name": "Message-Id", "value": "<CAmade-up-1@mail.example.net>"},
+                {"name": "References", "value": "<parent-0@corp.example.org> <p-1@x.example>"},
+                {"name": "In-Reply-To", "value": "<p-1@x.example>"},
+                {"name": "Subject", "value": "Lunch"},
+                {"name": "To", "value": "demo.inbox@example.net"},
+                {"name": "Content-Type", "value": 'multipart/mixed; boundary="000abc"'},
+            ],
+            "body": {"size": 0},
+            "parts": [
+                {
+                    "partId": "0",
+                    "mimeType": "multipart/alternative",
+                    "filename": "",
+                    "headers": [{"name": "Content-Type", "value": "multipart/alternative"}],
+                    "body": {"size": 0},
+                    "parts": [
+                        {
+                            "partId": "0.0",
+                            "mimeType": "text/plain",
+                            "filename": "",
+                            "headers": [
+                                {"name": "Content-Type", "value": 'text/plain; charset="UTF-8"'},
+                                {"name": "Content-Transfer-Encoding", "value": "quoted-printable"},
+                            ],
+                            "body": {"size": len(plain), "data": b64url(plain)},
+                        },
+                        {
+                            "partId": "0.1",
+                            "mimeType": "text/html",
+                            "filename": "",
+                            "headers": [{"name": "Content-Type", "value": "text/html"}],
+                            "body": {"size": len(html), "data": b64url(html)},
+                        },
+                    ],
+                },
+                {
+                    "partId": "1",
+                    "mimeType": "application/pdf",
+                    "filename": "menu.pdf",
+                    "headers": [
+                        {"name": "Content-Type", "value": 'application/pdf; name="menu.pdf"'},
+                        {"name": "Content-Disposition", "value": "attachment"},
+                    ],
+                    "body": {"size": 2048, "attachmentId": ATTACHMENT},
+                },
+            ],
+        },
+    }
+    message.update(overrides)
+    return message
+
+
+MESSAGE_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/18f0000000000007"
+
+
+def message_exchange(body: Any, url: str = MESSAGE_URL) -> httpx.Response:
+    return httpx.Response(200, json=body, request=httpx.Request("GET", url))
+
+
+def parts_of(part: dict[str, Any]) -> list[dict[str, Any]]:
+    return [part, *(item for child in part.get("parts", []) for item in parts_of(child))]
+
+
+def test_a_message_keeps_the_allowlisted_headers_and_numbered_ids(recorder: ModuleType) -> None:
+    fixture = scrubbed(recorder, message_exchange(made_up_message()))
+    payload = json.loads(fixture.response.body)["payload"]
+    assert [h["name"] for h in payload["headers"]] == [
+        "MIME-Version",
+        "From",
+        "Date",
+        "Message-Id",
+        "References",
+        "In-Reply-To",
+        "Subject",
+        "To",
+        "Content-Type",
+    ]
+    values = {h["name"]: h["value"] for h in payload["headers"]}
+    assert values["Message-Id"] == "<1@example.com>"
+    assert values["References"] == "<2@example.com> <3@example.com>"
+    assert values["In-Reply-To"] == "<3@example.com>", "the same id, the same number"
+    assert values["From"] == "User <user@example.com>", "the display name goes too"
+    assert values["To"] == "user@example.com"
+    plain_headers = parts_of(payload)[2]["headers"]
+    assert [h["name"] for h in plain_headers] == ["Content-Type"], "every part's headers"
+
+
+def test_a_message_s_bodies_are_decoded_scrubbed_and_encoded_again(recorder: ModuleType) -> None:
+    original = made_up_message()
+    fixture = scrubbed(recorder, message_exchange(original))
+    message = json.loads(fixture.response.body)
+    plain, html = parts_of(message["payload"])[2:4]
+    text = unb64url(plain["body"]["data"]).decode()
+    assert text == "Hi,\r\nwrite to user@example.com or <user@example.com>.\r\n"
+    assert "mailto:user@example.com" in unb64url(html["body"]["data"]).decode()
+    sizes = [part["body"]["size"] for part in parts_of(original["payload"])]
+    assert [part["body"]["size"] for part in parts_of(message["payload"])] == sizes
+    assert "=" not in plain["body"]["data"], "upstream's padding kept: none"
+    assert message["snippet"] == "Hi, write to user@example.com"
+    assert "raw" not in message
+    assert parts_of(message["payload"])[4]["body"]["attachmentId"] == "att-1"
+    assert (message["id"], message["threadId"]) == (original["id"], original["threadId"])
+    assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == []
+
+
+def test_bytes_in_another_charset_survive_the_body_scrub(recorder: ModuleType) -> None:
+    latin = "Grüße an bob@corp.example.org"
+    message = made_up_message(
+        payload={
+            "partId": "",
+            "mimeType": "text/plain",
+            "filename": "",
+            "headers": [{"name": "Content-Type", "value": "text/plain; charset=iso-8859-1"}],
+            "body": {"size": 29, "data": b64url(latin, "iso-8859-1") + "=="},
+        }
+    )
+    fixture = scrubbed(recorder, message_exchange(message))
+    data = json.loads(fixture.response.body)["payload"]["body"]["data"]
+    assert unb64url(data) == "Grüße an user@example.com".encode("iso-8859-1")
+    assert data.endswith("="), "upstream's padding kept"
+
+
+def test_a_thread_numbers_one_id_once_across_its_messages(recorder: ModuleType) -> None:
+    first = made_up_message()
+    reply = made_up_message(id="18f0000000000008")
+    reply["payload"] = {
+        **reply["payload"],
+        "headers": [
+            {"name": "Message-ID", "value": "<CAmade-up-2@mail.example.net>"},
+            {"name": "In-Reply-To", "value": "<CAmade-up-1@mail.example.net>"},
+        ],
+    }
+    url = "https://gmail.googleapis.com/gmail/v1/users/me/threads/18f0000000000007"
+    thread = {"id": first["threadId"], "historyId": "1353", "messages": [first, reply]}
+    fixture = scrubbed(recorder, message_exchange(thread, url))
+    messages = json.loads(fixture.response.body)["messages"]
+    headers = [{h["name"]: h["value"] for h in m["payload"]["headers"]} for m in messages]
+    assert headers[0]["Message-Id"] == "<1@example.com>"
+    assert headers[1] == {"Message-ID": "<4@example.com>", "In-Reply-To": "<1@example.com>"}
+    assert [m["payload"]["parts"][1]["body"]["attachmentId"] for m in messages[:1]] == ["att-1"]
+
+
+def test_an_attachment_id_is_numbered_in_the_path_and_the_body_alike(
+    recorder: ModuleType,
+) -> None:
+    url = f"{MESSAGE_URL}/attachments/{ATTACHMENT}"
+    response = message_exchange({"attachmentId": ATTACHMENT, "size": 3, "data": b64url("abc")}, url)
+    fixture = scrubbed(recorder, response)
+    assert fixture.request.url == f"{MESSAGE_URL}/attachments/att-1"
+    assert json.loads(fixture.response.body)["attachmentId"] == "att-1"
+    assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == []
+
+
+def test_an_unscrubbed_message_is_refused(recorder: ModuleType) -> None:
+    raw = fixture_from_response(message_exchange(made_up_message()))
+    leaks = recorder.check(recorder.to_json(raw), raw, SECRETS)
+    assert leaks == [
+        "an e-mail address other than user@example.com",
+        "a <...@...> other than <n@example.com> and <user@example.com>, in the fixture's "
+        "text and a decoded body.data",
+        "a MIME header outside the allowlist (ARC-Seal, Content-Disposition, "
+        "Content-Transfer-Encoding, DKIM-Signature, Received, X-Google-Smtp-Source)",
+        "a raw field, a whole message",
+        "an attachmentId that is not att-<n>",
+    ]
+
+
+def test_an_address_left_in_a_decoded_body_is_refused(recorder: ModuleType) -> None:
+    """The check decodes every ``body.data``: an address there is invisible as base64url."""
+    fixture = scrubbed(recorder, message_exchange(made_up_message()))
+    message = json.loads(fixture.response.body)
+    message["payload"]["parts"][0]["parts"][0]["body"]["data"] = b64url("to bob@x.example")
+    left = fixture.model_copy(
+        update={"response": fixture.response.model_copy(update={"body": json.dumps(message)})}
+    )
+    assert "bob@x.example" not in recorder.to_json(left)
+    leaks = recorder.check(recorder.to_json(left), left, SECRETS)
+    assert leaks == ["an e-mail address other than user@example.com"]
+
+
+def test_an_answer_the_message_step_leaves_alone_keeps_upstream_s_text(
+    recorder: ModuleType,
+) -> None:
+    text = '{\n  "labels": [\n    {\n      "id": "INBOX"\n    }\n  ]\n}\n'
+    assert recorder.MessageScrub().body(text) == text
+
+
+def test_a_link_in_angle_brackets_is_no_message_id(recorder: ModuleType) -> None:
+    """A plain-text mail writes its links ``<https://...>``; one may carry an address."""
+    text = "Check it: <https://accounts.example/alert?Email=bob@corp.example.org&x=1>\r\n"
+    body = {"size": len(text), "data": b64url(text)}
+    message = made_up_message(
+        payload={"partId": "", "mimeType": "text/plain", "filename": "", "body": body}
+    )
+    fixture = scrubbed(recorder, message_exchange(message))
+    data = json.loads(fixture.response.body)["payload"]["body"]["data"]
+    assert "Email=user@example.com&x=1>" in unb64url(data).decode()
+    assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == []
+
+
+def test_an_unnumbered_id_in_a_decoded_body_is_refused_by_where(recorder: ModuleType) -> None:
+    text = "In-Reply-To: <abc.123@localhost>\r\n"
+    message = made_up_message(
+        payload={
+            "partId": "",
+            "mimeType": "text/plain",
+            "filename": "",
+            "body": {"data": b64url(text)},
+        }
+    )
+    fixture = scrubbed(recorder, message_exchange(message))
+    assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == [
+        "a <...@...> other than <n@example.com> and <user@example.com>, in a decoded body.data"
+    ]
+
+
+def test_a_profile_picture_url_is_redacted(recorder: ModuleType) -> None:
+    """A security notice shows the avatar of the account it names: it identifies a person."""
+    avatar = "https://lh3.googleusercontent.com/a/ACg8ocMadeUpAvatarId=s96-c"
+    page = f'<img src="{avatar}" alt=""><p>bob@corp.example.org</p>'
+    message = made_up_message(
+        snippet=f"see {avatar}",
+        payload={
+            "partId": "",
+            "mimeType": "text/html",
+            "filename": "",
+            "body": {"data": b64url(page)},
+        },
+    )
+    raw = fixture_from_response(message_exchange(message))
+    assert "a Google account's profile-picture URL" in recorder.check(
+        recorder.to_json(raw), raw, SECRETS
+    )
+    fixture = scrubbed(recorder, message_exchange(message))
+    scrubbed_message = json.loads(fixture.response.body)
+    page_after = unb64url(scrubbed_message["payload"]["body"]["data"]).decode()
+    assert 'src="https://lh3.googleusercontent.com/a/REDACTED"' in page_after
+    assert scrubbed_message["snippet"] == "see https://lh3.googleusercontent.com/a/REDACTED"
+    assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == []
+
+
+def test_a_task_recording_writes_each_exchange_under_the_task(
+    recorder: ModuleType,
+    replay_fixture: ReplayFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The search's list and two metadata calls, replayed, written as ok, ok_2 and ok_3."""
+    monkeypatch.setattr(recorder, "ROOT", tmp_path)
+    monkeypatch.setattr(recorder, "FIXTURES", tmp_path / "fixtures")
+    replay_fixture("oauth2_token", "ok")
+    routes = [replay_fixture("search_messages", case) for case in ("ok", "ok_2", "ok_3")]
+    argv = ["search_messages", "ok", "q=newer_than:1y", "max_results=2"]
+    assert recorder.main(argv) == 0
+    written = sorted(p.name for p in (tmp_path / "fixtures" / "search_messages").iterdir())
+    assert written == ["ok.json", "ok_2.json", "ok_3.json"]
+    assert [route.call_count for route in routes] == [1, 1, 1]
+    for case in ("ok", "ok_2", "ok_3"):
+        again = json.loads((tmp_path / "fixtures" / "search_messages" / f"{case}.json").read_text())
+        kept = json.loads(
+            (ROOT / "tests" / "fixtures" / "search_messages" / f"{case}.json").read_text()
+        )
+        body = again["response"]["body"]
+        assert recorder.MessageScrub().body(body) == body, "the scrub is idempotent"
+        assert again["request"] == kept["request"]
+        if case != "ok":  # the committed fixtures keep "Google", recorded before the rule
+            headers = {h["name"]: h["value"] for h in json.loads(body)["payload"]["headers"]}
+            assert headers["From"] == "User <user@example.com>"
+
+
+def test_a_task_that_fails_writes_nothing(
+    recorder: ModuleType,
+    respx_mock: respx.MockRouter,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(recorder, "FIXTURES", tmp_path / "fixtures")
+    assert recorder.main(["search_messages", "ok", "q=x", "max_results=51"]) == 1
+    assert not respx_mock.calls
+    assert not (tmp_path / "fixtures").exists()
+
+
+@pytest.mark.parametrize(
+    ("value", "scrubbed"),
+    [
+        ("Alice Example <alice@corp.example.org>", "User <user@example.com>"),
+        ('"Doe, John" <john@corp.example.org>', "User <user@example.com>"),
+        ('"" <john@corp.example.org>', "<user@example.com>"),
+        ("<john@corp.example.org>", "<user@example.com>"),
+        ("john@corp.example.org", "user@example.com"),
+        (
+            'Alice <a@x.example>, "Doe, John" <j@y.example>,<c@z.example>, d@w.example',
+            "User <user@example.com>, User <user@example.com>,<user@example.com>, user@example.com",
+        ),
+        ("undisclosed-recipients:;", "undisclosed-recipients:;"),
+    ],
+)
+def test_an_address_header_keeps_no_display_name(
+    recorder: ModuleType, value: str, scrubbed: str
+) -> None:
+    assert recorder.scrub_emails(recorder.scrub_display_names(value)) == scrubbed
+
+
+def test_display_names_go_on_every_part_s_address_headers_alone(recorder: ModuleType) -> None:
+    """From, To, Cc and Bcc of the payload and of a part; Subject keeps its words."""
+    forwarded = {
+        "partId": "1",
+        "mimeType": "message/rfc822",
+        "filename": "",
+        "headers": [
+            {"name": "From", "value": '"Bob Builder" <bob@corp.example.org>'},
+            {"name": "Cc", "value": "Carol <carol@corp.example.org>, dave@corp.example.org"},
+        ],
+        "body": {"size": 0},
+    }
+    message = made_up_message()
+    message["payload"]["headers"] = [
+        {"name": "To", "value": "Alice Example <alice@corp.example.org>"},
+        {"name": "bcc", "value": "Eve <eve@corp.example.org>"},
+        {"name": "Reply-To", "value": "Alice Example <alice@corp.example.org>"},
+        {"name": "Subject", "value": "Lunch with Alice Example <alice@corp.example.org>"},
+    ]
+    message["payload"]["parts"] = [forwarded]
+    payload = json.loads(scrubbed(recorder, message_exchange(message)).response.body)["payload"]
+    assert payload["headers"] == [
+        {"name": "To", "value": "User <user@example.com>"},
+        {"name": "bcc", "value": "User <user@example.com>"},
+        {"name": "Subject", "value": "Lunch with Alice Example <user@example.com>"},
+    ], "Reply-To is off the allowlist; a Subject is no address header"
+    assert payload["parts"][0]["headers"] == [
+        {"name": "From", "value": "User <user@example.com>"},
+        {"name": "Cc", "value": "User <user@example.com>, user@example.com"},
+    ]
