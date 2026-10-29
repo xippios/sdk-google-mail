@@ -19,7 +19,9 @@ recipients in the ``To``, ``Cc``, and ``Bcc`` headers".
 Every value is checked before anything is sent (``addresses``, ``check_subject``): an
 address list is a list, each item one address with a domain, display name allowed
 (``Alice <alice@example.com>``), and no header value holds a line break, which would
-start a header of its own.
+start a header of its own. A domain outside ASCII is refused too: the library would write
+it as an RFC 2047 encoded word inside the addr-spec, which RFC 2047 forbids, and 0.1.0
+applies no IDNA encoding. A display name may hold any character; it goes out encoded.
 
 A reply (``Reply``, from the original's ``format=metadata`` read) follows the discovery
 document's rule for adding a message or draft to a thread (``schemas.Message.threadId``):
@@ -80,6 +82,9 @@ def _one_address(name: str, value: object) -> Address:
     header = _REGISTRY("To", value)
     # An AddressHeader, which typeshed cannot type as the registry's dynamic class.
     found: tuple[Address, ...] = getattr(header, "addresses", ())
+    if len(found) == 1 and not found[0].domain.isascii():
+        # RFC 2047 forbids an encoded word inside an addr-spec, where the library puts one.
+        raise _refuse(f"{name}: the domain must be ASCII; IDNA encoding is not applied in 0.1.0")
     if header.defects or len(found) != 1 or not found[0].username or not found[0].domain:
         raise _refuse(
             f"{name}: each item is one address with a domain, e.g. 'alice@example.com' or "
@@ -99,7 +104,8 @@ def addresses(name: str, values: object, *, required: bool) -> list[Address]:
 
     Raises:
         InvalidRequestError: ``values`` is not a list, holds an item that is not one
-            address with a domain or holds a line break, or is empty while ``required``.
+            address with a domain, whose domain is not ASCII or that holds a line break,
+            or is empty while ``required``.
     """
     if values is None:
         values = []
