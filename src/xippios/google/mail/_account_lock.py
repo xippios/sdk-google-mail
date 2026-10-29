@@ -5,17 +5,18 @@
 """The ``--account`` lock: tools bound to one account, so no tool takes ``account``.
 
 Copied from sdk-cashctrl's ``src/xippios/cashctrl/_org_lock.py`` at
-``6db155b9f80e20b17b1533db66134b9eb2144c46`` (``main``, release 0.3.0), its ``--org`` lock,
-with ``account`` for ``org`` and ``AccountLock`` for ``OrgLock``, and ``instructions``
-taking ``bound=``, the bound server's own base text (ADR-0024; ADR-0025, D-d). The lock
-is no middleware but a wrapper: given ``--account <name>``, ``bind_tasks`` hands
-``build_server`` tools on which ``account`` is bound when the server is built. Each wrapper keeps its task's ``__name__``, so tool names and
-``MCP_CAPS`` keys stay as they are, and its docstring without the ``account`` line under
-``Args:``; its signature and annotations leave ``account`` out, so no tool's input schema
-declares it, and it calls the task with ``account=<name>``. The account list of a bound
-server lists that account only (``_only_the_locked_tenant``), still with ``meta.tenant``
-``None``. The server's instructions are its bound text, which says nothing of an
-``account`` argument, followed by one sentence naming the account (``lock_sentence``).
+``6db155b9f80e20b17b1533db66134b9eb2144c46`` (``main``, release 0.3.0), its ``--org``
+lock, with ``account`` for ``org`` and ``AccountLock`` for ``OrgLock``, and
+``instructions`` taking ``bound=``, the bound server's own base text (ADR-0024; ADR-0025,
+D-d). The lock is no middleware but a wrapper: given ``--account <name>``, ``bind_tasks``
+hands ``build_server`` tools on which ``account`` is bound when the server is built. Each
+wrapper keeps its task's ``__name__``, so tool names and ``MCP_CAPS`` keys stay as they
+are, and its docstring without the ``account`` line under ``Args:``; its signature and
+annotations leave ``account`` out, so no tool's input schema declares it, and it calls the
+task with ``account=<name>``. The account list of a bound server lists that account only
+(``_only_the_locked_tenant``), still with ``meta.tenant`` ``None``. The server's
+instructions are its bound text, which says nothing of an ``account`` argument, followed
+by one sentence naming the account (``lock_sentence``).
 
 sdk-cashctrl kept from sdk-core's ``cb8ecdf379c04522e5f1dcd91ea5e8bdfa1fb3ff``
 (``src/xippios/core/mcp/server.py``): ``TenantLock``'s validation of the parameter and
