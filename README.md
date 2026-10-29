@@ -59,7 +59,8 @@ exactly tasks.__all__. -->
 
 | Upstream operation | Task function | MCP tool | Status |
 | --- | --- | --- | --- |
-| (none yet) | | | |
+| none: the declared accounts | `list_accounts` | `google_mail_list_accounts` | available; names only, no request |
+| `GET gmail/v1/users/{userId}/profile` (`users.getProfile`) | `get_profile(account)` | `google_mail_get_profile` | available; `userId` `me`, the account's own |
 
 ## Upstream terms and attribution
 
