@@ -13,9 +13,13 @@ it at Google's token endpoint for a short-lived access token, which it sends as
 ``POST https://oauth2.googleapis.com/token`` with the form fields ``client_id``,
 ``client_secret``, ``grant_type=refresh_token`` and ``refresh_token``; the secret is sent,
 since Google's pages disagree on whether a Desktop client needs it (the investigation's
-C2). The answer carries ``access_token``, ``expires_in``, ``scope`` and ``token_type``,
-and, from a consent screen whose grants expire (an app in Testing status issues seven-day
-grants), ``refresh_token_expires_in`` (F19, the probe of 2026-10-29); no new refresh token.
+C2). The answer carries ``access_token``, ``expires_in``, ``scope`` and ``token_type``, no
+new refresh token, and may carry ``refresh_token_expires_in``, "The remaining lifetime of
+the refresh token in seconds", which the guide says is "only set when the user grants
+time-based access" (``docs/upstream/pages/oauth2-web-server.md``, its table of the token
+answer, about line 946). ``docs/upstream/pages/oauth2.md`` (about line 311) gives a
+consent screen in Testing status refresh tokens "expiring in 7 days"; that such a grant's
+answer carries the field is F19's observation, the probe of 2026-10-29 under demo's grant.
 
 Nothing is written to disk: the access token, when it lapses and the granted scopes live
 in the auth object's memory, one per account client (``_client.client_for``), and go with
@@ -225,9 +229,10 @@ class RefreshTokenAuth(EnvKeyAuth):
     def refresh_token_expires_in(self) -> int | None:
         """The last answer's ``refresh_token_expires_in`` in seconds, if it carried one.
 
-        Google sends it when the refresh token itself expires: a grant of a consent
-        screen in Testing status lives seven days (F19). Once it has run out the next
-        refresh answers ``invalid_grant``, whose message says what to re-run.
+        The guide documents it for time-based access (``oauth2-web-server.md``); F19 saw
+        it on demo's grant, whose consent screen is in Testing status, where refresh
+        tokens expire in seven days (``oauth2.md``). Once it has run out the next refresh
+        answers ``invalid_grant``, whose message says what to re-run.
         """
         with self._state:
             return self._refresh_token_expires_in
@@ -279,7 +284,7 @@ class RefreshTokenAuth(EnvKeyAuth):
         Raises:
             AuthError: HTTP 400 ``invalid_grant``: the refresh token was revoked,
                 expired (unused for six months, or a seven-day grant of an app in
-                Testing status) or never valid; the message names the account, the
+                Testing status, ``oauth2.md``) or never valid; the message names the account, the
                 consent tool's re-run and the variable to set.
             ConfigError: HTTP 401 ``invalid_client``: the token endpoint refused the
                 OAuth client; the message names ``GOOGLE_CLIENT_ID`` and
