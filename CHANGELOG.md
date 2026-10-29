@@ -15,3 +15,13 @@ All notable changes to this project are documented here. The format follows
 - The read server's entry point is `xippios-google-mail-mcp-read`, since a write
   server with an entry point of its own follows in this release (decision of
   2026-10-29).
+- The documentation snapshot in `docs/upstream/`, captured on 2026-10-29 by
+  `scripts/refresh_upstream.py`: Gmail's discovery document (revision 20261026, kept
+  with its keys sorted), the API's usage limits, errors and scopes, the Gmail Help
+  article on search operators, and Google's OAuth 2.0 overview with its guides for
+  desktop apps and web server applications, the pages as Markdown.
+- README and CLAUDE.md name the credentials the API takes, an OAuth 2.0 bearer renewed
+  from a refresh token per account with the operator's Desktop-app client, where the
+  scaffold, rendered without a key, said none was needed; CLAUDE.md's rate-limit row
+  names upstream's quota, 6,000 units per minute per user per project, where it said
+  upstream documents no limit.

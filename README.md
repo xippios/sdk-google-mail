@@ -14,7 +14,12 @@ uv add "xippios-google-mail[mcp]"     # + MCP server
 uv add "xippios-google-mail[http]"    # + FastAPI router
 ```
 
-No API key is needed.
+From PR 3 on, the API takes an OAuth 2.0 bearer token, renewed from a refresh token per
+Gmail account. The environment names the operator's Desktop-app OAuth client,
+`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, the accounts, `GOOGLE_ACCOUNTS`
+(`work,private`), and one `GOOGLE_<NAME>_REFRESH_TOKEN` per account (the test account
+`demo` is declared by `GOOGLE_DEMO_REFRESH_TOKEN` alone). A refresh token comes from the
+consent tool `xippios-google-mail-auth`.
 
 ## 30-second example
 

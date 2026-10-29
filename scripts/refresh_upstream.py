@@ -1,36 +1,58 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = []
+# dependencies = ["markdownify==1.2.3"]
+#
+# [tool.uv]
+# exclude-newer = "2026-10-29T00:00:00Z"
 # ///
 """Refresh the upstream documentation snapshot in ``docs/upstream/`` (``/refresh-upstream``).
 
-The template's skeleton of a capture script. A source fills ``PAGES``, ``SPEC_URL`` where
-its documentation names a machine-readable API document, ``ATTRIBUTION``, ``CAPTURE`` and,
-where a page is not kept as fetched, ``reduce``, and rewrites this paragraph to say what it
-captures; the rest is the family's capture frame. Until ``PAGES`` or ``SPEC_URL`` is
-filled, the script refuses to run.
+Gmail documents its REST API in a discovery document, which the REST reference at
+``DOCS_URL`` names ("This service provides the following discovery document"), and on
+developers.google.com, Google Identity's OAuth 2.0 pages and the Gmail Help Center. The
+script writes:
+
+- ``discovery.json``: the discovery document, ``SPEC_URL``, with its keys sorted: the
+  discovery service serves the members of every object in a new order on each request,
+  so the file is the document as fetched re-serialised with ``sort_keys=True``, once the
+  fetched text is checked to be ``json.dumps(indent=2)`` of it in its served order;
+- ``pages/quota.md``, ``pages/handle-errors.md`` and ``pages/auth-scopes.md``: the Gmail
+  API's usage limits, its errors and its scopes, from developers.google.com;
+- ``pages/search-operators.md``: the Gmail Help article on the search operators that
+  ``messages.list``'s ``q`` takes;
+- ``pages/oauth2.md``, ``pages/oauth2-native-app.md`` and ``pages/oauth2-web-server.md``:
+  Google Identity's OAuth 2.0 overview (refresh-token expiry among it) and its guides for
+  desktop apps (the loopback flow with PKCE) and web server applications (the refresh of
+  an access token);
+- ``FETCHED.md``: regenerated whole.
+
+Each HTML page becomes Markdown with ``markdownify`` (``_Markdown``): a line naming the
+URL it was converted from, the page's title, its article, and on developers.google.com
+the content footer with its licence and its "Last updated" date; the navigation, the
+feedback widgets, the Page Summary the pages mark "Generated with AI" and the icons are
+dropped, and a table with merged cells or a nested table stays HTML (conventions §3). A
+page the converter does not recognise (another title, an element it does not know,
+another number of HTML tables than ``HTML_TABLES`` says) stops the run.
 
 Everything is fetched before anything is written, one request at a time after a pause,
-each URL retried at most once after a network error or a 5xx. Each page with a file is
-written under ``docs/upstream/``, and ``FETCHED.md`` is regenerated whole: the UTC time of
-the run with an explicit ``Z``, the attribution, and one row per page with its HTTP
-status, the size and sha256 of the body as fetched, and its ETag and Last-Modified where
-sent. A page recorded without a file (a 403 or a 404, a page without documentation text)
-has a row of its own, and a file cut from a shared document keeps the whole document's
-size and sha256 in its row (conventions §3). Files the run does not produce are removed
-from the subdirectories it writes to; nothing else under ``docs/upstream/`` is touched.
-Every run stops, before writing, when a page states a copyright, a licence or terms of use
-that ``ATTRIBUTION`` does not record. No key is needed or read. Run from the repository
-root::
+each URL retried at most once after a network error or a 5xx. Every page's body changes
+on each request (a script nonce, the order of attributes in the navigation, the
+discovery document's member order), so every row is ``stable=False`` and records no
+size, sha256 or validators; the files are what a refresh diffs. Files the run does not
+produce are removed from the subdirectories it writes to; nothing else under
+``docs/upstream/`` is touched. Every run stops, before writing, when the visible text of
+an HTML page, or the text of the discovery document, states a copyright, a licence or
+terms of use that ``ATTRIBUTION`` does not record. No key, token or credential is needed,
+sent or read. Run from the repository root::
 
     uv run scripts/refresh_upstream.py            # fetch, then write the snapshot
     uv run scripts/refresh_upstream.py --check    # fetch and compare; write nothing
 
 ``--check`` exits 1 when the snapshot differs from what upstream serves now, ``Fetched``
-aside. Where the documentation is HTML, ``reduce`` converts it to Markdown with
-``markdownify``, the one converter a capture script may declare: in the ``# /// script``
-block above, ``dependencies = ["markdownify==X.Y.Z"]``, and at the same pin in the dev
-group of ``pyproject.toml``, so that ``mypy --strict`` reads its types.
+aside. HTML is converted to Markdown with ``markdownify``, the one converter a capture
+script may declare: in the ``# /// script`` block above, and at the same pin in the dev
+group of ``pyproject.toml``, so that ``mypy --strict`` reads its types; Beautiful Soup,
+which it parses with, is reached through it and never imported here.
 """
 
 import argparse
@@ -48,8 +70,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
+from html.parser import HTMLParser
+from importlib.metadata import version
 from pathlib import Path
 from typing import IO, Any
+from urllib.parse import urljoin, urlsplit
+
+from markdownify import ATX, BACKSLASH, MarkdownConverter
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT = ROOT / "docs/upstream"
@@ -80,6 +107,8 @@ class Page:
             reference in a refusal page): its row records no size, sha256 or validators.
         excerpt: The file is this source's part of a shared document (conventions §3);
             the row keeps the whole document's size and sha256, and its note says so.
+        title: The page's title as printed, its ``<h1>``; another stops the run, so a
+            localised or moved page is not taken for this one.
     """
 
     url: str
@@ -88,33 +117,162 @@ class Page:
     note: str = ""
     stable: bool = True
     excerpt: bool = False
+    title: str = ""
+
+
+GMAIL_DOCS = "https://developers.google.com/workspace/gmail/api"
+IDENTITY_DOCS = "https://developers.google.com/identity/protocols/oauth2"
+DEVSITE = "developers.google.com"
+HELP_CENTER = "support.google.com"
+
+HTML_TABLES = {
+    "pages/quota.md": 1,
+    "pages/oauth2-native-app.md": 4,
+    "pages/oauth2-web-server.md": 4,
+}
+"""How many tables each file keeps as HTML, those with merged cells or a nested table.
+
+A nested table is counted with the table it sits in. ``reduce`` stops the run on any
+other count, so the rows' notes stay true (conventions §3).
+"""
+
+
+def _converted(file: str) -> str:
+    tables = HTML_TABLES.get(file, 0)
+    note = "converted to Markdown"
+    if tables:
+        plural = "s" if tables > 1 else ""
+        note += f"; {tables} table{plural} with merged cells or a nested table kept as HTML"
+    return note
+
+
+def _page(url: str, file: str, title: str) -> Page:
+    return Page(url, file, note=_converted(file), stable=False, title=title)
 
 
 PAGES: tuple[Page, ...] = (
-    # Page(DOCS_URL, "pages/index.md", note="converted to Markdown"),
-    # Page("https://api.example.org/legal", status=403, note="403 at the CDN edge"),
+    _page(f"{GMAIL_DOCS}/reference/quota", "pages/quota.md", "Usage limits"),
+    _page(f"{GMAIL_DOCS}/guides/handle-errors", "pages/handle-errors.md", "Resolve errors"),
+    _page(f"{GMAIL_DOCS}/auth/scopes", "pages/auth-scopes.md", "Choose Gmail API scopes"),
+    _page(
+        f"https://{HELP_CENTER}/mail/answer/7190",
+        "pages/search-operators.md",
+        "Refine searches in Gmail",
+    ),
+    _page(IDENTITY_DOCS, "pages/oauth2.md", "Using OAuth 2.0 to Access Google APIs"),
+    _page(
+        f"{IDENTITY_DOCS}/native-app", "pages/oauth2-native-app.md", "OAuth 2.0 for Desktop Apps"
+    ),
+    _page(
+        f"{IDENTITY_DOCS}/web-server",
+        "pages/oauth2-web-server.md",
+        "Using OAuth 2.0 for Web Server Applications",
+    ),
 )
 """Every page the snapshot records, in the order of ``FETCHED.md``'s rows."""
 
-SPEC_URL: str | None = None
-"""The machine-readable API document (OpenAPI, Swagger) the documentation names, if any.
+SPEC_URL: str | None = "https://gmail.googleapis.com/$discovery/rest?version=v1"
+"""The machine-readable API document the documentation names: Gmail's discovery document.
 
-The convention of ``/refresh-upstream``: a document named inside a page rather than linked
-from it (a Swagger UI's configuration) is recorded here once found, and kept verbatim as
-``SPEC_FILE`` after ``PAGES``. Where the page's setting must be read on every run, the
-source reads it there instead and ``CAPTURE`` says from where.
+The REST reference at ``DOCS_URL`` names it ("This service provides the following
+discovery document") and calls it "a machine-readable specification for describing and
+consuming REST APIs"; the script keeps it as ``SPEC_FILE``, after ``PAGES``, its keys
+sorted (``discovery``), and does not keep the reference's pages.
 """
-SPEC_FILE = "openapi/openapi.json"
+SPEC_FILE = "discovery.json"
 """The document's path under ``docs/upstream/``, with the extension it is served with."""
+SPEC_NOTE = (
+    "SPEC_URL, the discovery document, its keys sorted: the service serves the members of "
+    "every object in a new order on each request"
+)
+"""The discovery document's note in ``FETCHED.md``."""
 
-ATTRIBUTION: tuple[str, ...] = ()
+
+@dataclass(frozen=True)
+class Statement:
+    """A copyright line, licence or terms of use a page prints, as printed.
+
+    Attributes:
+        text: The statement as printed, its whitespace collapsed.
+        where: Where it is printed, for ``FETCHED.md``'s Attribution.
+        link: For a link whose text names terms of use: its target, absolute. The check
+            accepts the text only as the text of a link to this target, so the same words
+            elsewhere still stop the run.
+    """
+
+    text: str
+    where: str
+    link: str | None = None
+
+
+DEVSITE_FOOTER = (
+    "Except as otherwise noted, the content of this page is licensed under the Creative "
+    "Commons Attribution 4.0 License, and code samples are licensed under the Apache 2.0 "
+    "License. For details, see the Google Developers Site Policies. Java is a registered "
+    "trademark of Oracle and/or its affiliates."
+)
+"""The content footer of every developers.google.com page, as printed."""
+
+ATTRIBUTION: tuple[Statement, ...] = (
+    Statement(
+        DEVSITE_FOOTER,
+        "the content footer of every developers.google.com page here, its links to "
+        "https://creativecommons.org/licenses/by/4.0/, "
+        "https://www.apache.org/licenses/LICENSE-2.0 and "
+        "https://developers.google.com/site-policies; each Markdown file made from one keeps "
+        "the footer and the page's Last updated date",
+    ),
+    Statement(
+        "Terms of Service",
+        "a link in the site footer of the Gmail API pages",
+        "https://developers.google.com/workspace/terms",
+    ),
+    Statement(
+        "Terms of Service",
+        "a link in the site footer of the Google Identity pages",
+        "https://developers.google.com/terms",
+    ),
+    Statement(
+        "If prompted, read and accept the API's Terms of Service.",
+        "a step of enabling an API in the OAuth 2.0 guides for desktop apps and for web "
+        "server applications",
+    ),
+    Statement("\N{COPYRIGHT SIGN}2026 Google", "the footer of the Gmail Help article"),
+    Statement(
+        "Terms of Service",
+        "a link in the footer and in the navigation drawer of the Gmail Help article",
+        "https://www.google.com/intl/en/policies/terms/",
+    ),
+)
 """Every copyright line, licence or terms of use the documentation states, as printed.
 
-Empty: it states none. ``FETCHED.md`` quotes them under Attribution, and every run stops
-when a page states one that is not here.
+``FETCHED.md`` lists them under Attribution; the discovery document states none. Every run
+stops when the visible text of a page states one that is not here, or names terms in a
+link to a target that is not recorded.
 """
 
-CAPTURE = ""
+CAPTURE = (
+    "The discovery document is kept with its keys sorted: the discovery service serves the "
+    "members of every object in a new order on each request, so the script checks that the "
+    "fetched text is the document written with `json.dumps(indent=2, ensure_ascii=False)` in "
+    "its served order and writes it again with `sort_keys=True`; nothing else changes, and "
+    f"arrays keep their order. The REST reference at {DOCS_URL} names the document, which it "
+    "calls a machine-readable specification of the API; the script keeps the document and "
+    "not the reference's pages. Each HTML page is converted to Markdown with markdownify "
+    f"{version('markdownify')} (Beautiful Soup {version('beautifulsoup4')}, html.parser), "
+    "headings in ATX style and underscores left unescaped, so that names read as upstream "
+    "writes them, links and images made absolute. A developers.google.com page keeps its "
+    "title, its `devsite-article-body` and its content footer, with the licence and the Last "
+    "updated date; the Gmail Help article keeps its title and its article text (`div.cc`). "
+    "Left out: the site's navigation, breadcrumbs and footers, the feedback and rating "
+    "widgets, the Page Summary panel of the OAuth 2.0 pages, which they mark "
+    '"Generated with AI", icons and buttons. A callout (`aside`) becomes a blockquote. A '
+    "table with merged cells (`rowspan`, `colspan`) or a nested table stays HTML, with its "
+    "cells' spans, links and inline markup and no other attribute, and its row's note counts "
+    "them (conventions §3). Every page's body changes on each request, the HTML pages by a "
+    "script nonce and the order of attributes in their navigation, so every row records no "
+    "size, sha256 or validators: the files are what a refresh diffs."
+)
 """``FETCHED.md``'s "How this is captured": what is converted, cut or left out, and why."""
 
 _STATEMENT = re.compile(
@@ -243,15 +401,76 @@ def decode(response: Response) -> str:
         raise changed(response.url, f"the body is not UTF-8 ({error})") from None
 
 
+_NO_TEXT = frozenset({"script", "style", "template"})
+_LINKED = frozenset((s.text, s.link) for s in ATTRIBUTION if s.link)
+_STATED = tuple(s.text for s in ATTRIBUTION if not s.link)
+
+
+class _VisibleText(HTMLParser):
+    """The text a reader sees, outside scripts, styles and templates, but recorded links.
+
+    A link whose text and absolute target are a recorded ``Statement`` leaves no text, so
+    the same words in prose or in a link elsewhere are still searched.
+    """
+
+    def __init__(self, base: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.base = base
+        self.parts: list[str] = []
+        self._hidden = 0
+        self._links: list[tuple[int, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        """Enter a script, a style or a template, or note where a link starts."""
+        if tag in _NO_TEXT:
+            self._hidden += 1
+        elif tag == "a":
+            href = dict(attrs).get("href") or ""
+            self._links.append((len(self.parts), urljoin(self.base, href.strip())))
+
+    def handle_endtag(self, tag: str) -> None:
+        """Leave a script, a style or a template, or drop a recorded link's text."""
+        if tag in _NO_TEXT and self._hidden:
+            self._hidden -= 1
+        elif tag == "a" and self._links:
+            start, href = self._links.pop()
+            if (" ".join("".join(self.parts[start:]).split()), href) in _LINKED:
+                del self.parts[start:]
+                self.parts.append(" ")
+
+    def handle_data(self, data: str) -> None:
+        """Keep visible text."""
+        if not self._hidden:
+            self.parts.append(data)
+
+
+def visible_text(page: Page, text: str) -> str:
+    """The visible text of an HTML page, entities decoded, whitespace collapsed."""
+    parser = _VisibleText(page.url)
+    parser.feed(text)
+    parser.close()
+    return " ".join("".join(parser.parts).split())
+
+
+def _is_html(page: Page) -> bool:
+    return page.file is not None and page.file.endswith(".md")
+
+
 def check_attribution(page: Page, response: Response) -> None:
     """Stop when the page states a copyright, licence or terms that ``ATTRIBUTION`` lacks.
 
-    The check reads the whole body with its entities decoded, so a footer that the Markdown
-    drops counts too; a source whose markup carries one of the words without stating
-    anything (a ``license`` class) checks the text its ``reduce`` keeps instead.
+    The check reads the visible text of an HTML page, its header and footer included and
+    its scripts, styles and templates left out: Google's pages carry licence comments of
+    the JavaScript libraries they load and the interface strings of their widgets, which
+    the page does not print. The recorded links' text is dropped (``_VisibleText``), then
+    the recorded statements, and the rest is searched. The discovery document is read
+    whole, its entities decoded.
     """
-    body = html.unescape(response.body.decode("utf-8", "replace"))
-    for statement in ATTRIBUTION:
+    if _is_html(page):
+        body = visible_text(page, decode(response))
+    else:
+        body = html.unescape(response.body.decode("utf-8", "replace"))
+    for statement in _STATED:
         body = body.replace(statement, "")
     match = _STATEMENT.search(body)
     if match:
@@ -301,23 +520,258 @@ def load_json(response: Response, indent: int = 2) -> Any:
     return document
 
 
-def reduce(page: Page, response: Response) -> bytes:
-    """The content ``page``'s file is written with: the body as fetched, by default.
+def discovery(response: Response) -> bytes:
+    """The discovery document with its keys sorted, once its fetched text is checked.
 
-    A source fills this where a page is not kept as fetched, and stops the run with
-    ``changed`` on a page it does not recognise, before anything is written:
-
-    - an HTML page becomes Markdown, its headings, tables and parameter lists kept, its
-      navigation dropped and a table with merged cells kept as HTML (conventions §3)::
-
-          from markdownify import markdownify  # the one converter (module docstring)
-
-          return markdownify(decode(response), heading_style="ATX").encode("utf-8")
-
-    - a shared document is cut to this source's part, ``load_json`` then ``dump_json``,
-      and its page marked ``excerpt=True``.
+    ``load_json`` stops unless the document, written with ``json.dumps(indent=2,
+    ensure_ascii=False)`` in the order it was served, is the fetched text; written again
+    with ``sort_keys=True``, it differs from it in the order of object members only.
     """
-    return response.body
+    document = load_json(response)
+    if not isinstance(document, dict) or (
+        document.get("kind"),
+        document.get("name"),
+        document.get("version"),
+    ) != ("discovery#restDescription", "gmail", "v1"):
+        raise changed(response.url, "it is not Gmail v1's discovery document")
+    text = json.dumps(document, indent=2, ensure_ascii=False, sort_keys=True)
+    return (text + "\n").encode("utf-8")
+
+
+_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+_DROPPED = frozenset(
+    {
+        "button",
+        "devsite-actions",
+        "devsite-feedback",
+        "devsite-key-takeaways-panel",
+        "devsite-thumb-rating",
+        "gkms-context-selector",
+        "noscript",
+        "script",
+        "style",
+        "svg",
+        "template",
+    }
+)
+"""Elements ``_Markdown`` drops with their content: widgets, the Page Summary panel (marked
+"Generated with AI"), an empty context selector, and what a reader does not see."""
+_UNWRAPPED = frozenset({"devsite-code"})
+"""Custom elements whose content is kept: the wrapper of a code block."""
+_ICONS = ("material-icons", "material-symbols", "google-symbols")
+"""Class prefixes of icon glyphs, whose text is a glyph's name, not documentation."""
+_TABLE_TAGS = frozenset({"table", "caption", "thead", "tbody", "tfoot", "tr", "th", "td"})
+_KEPT_TAGS = _TABLE_TAGS | {
+    "a",
+    "b",
+    "blockquote",
+    "br",
+    "code",
+    "em",
+    "i",
+    "li",
+    "ol",
+    "p",
+    "pre",
+    "strong",
+    "sub",
+    "sup",
+    "ul",
+    "var",
+}
+"""The tags a table kept as HTML keeps; any other is unwrapped and its text kept."""
+_ROWS = frozenset({"table", "thead", "tbody", "tfoot", "tr"})
+"""Tags whose whitespace between children is layout, dropped in a table kept as HTML."""
+_VOID = frozenset({"br"})
+_TOKEN = "XIPPIOSHTMLTABLE{}X"
+
+
+def _classes(element: Any) -> list[str]:
+    value = element.get("class") or []
+    return [value] if isinstance(value, str) else [str(name) for name in value]
+
+
+def _merged(table: Any) -> bool:
+    """Whether a table has a merged cell or a table nested in it, which a pipe table loses."""
+    cells = table.find_all(["td", "th"])
+    spans = any(cell.get(name, "1") != "1" for cell in cells for name in ("colspan", "rowspan"))
+    return spans or table.find("table") is not None
+
+
+def _html(node: Any, pre: bool = False) -> str:
+    """A node of a table kept as HTML: kept tags with their spans or ``href``, text escaped."""
+    if node.name is None:
+        text = html.escape(str(node), quote=False)
+        if pre:
+            return text
+        if not text.strip() and node.parent is not None and node.parent.name in _ROWS:
+            return ""
+        return re.sub(r"\s+", " ", text)
+    inner = "".join(_html(child, pre or node.name == "pre") for child in node.children)
+    if node.name not in _KEPT_TAGS:
+        return inner
+    kept = ("colspan", "rowspan") if node.name in ("th", "td") else ("href",)
+    attrs = "".join(
+        f' {name}="{html.escape(str(node[name]))}"' for name in kept if node.has_attr(name)
+    )
+    if node.name in _VOID:
+        return f"<{node.name}{attrs}>"
+    if not pre and node.name != "pre":
+        inner = inner.strip()
+    return f"<{node.name}{attrs}>{inner}</{node.name}>"
+
+
+def _html_table(url: str, table: Any) -> str:
+    """A table with merged cells or a nested table as HTML, one line per row of its own."""
+    lines = ["<table>"]
+    for part in table.find_all(["caption", "tr"]):
+        if part.find_parent("table") is table:
+            lines.append(_html(part))
+    lines.append("</table>")
+    text = "\n".join(lines)
+    if any(not line.strip() for line in text.split("\n")):
+        raise changed(
+            url, "a table kept as HTML would hold a blank line, which ends it in Markdown"
+        )
+    return text
+
+
+class _Markdown(MarkdownConverter):
+    """markdownify for one page: its title and article, the chrome dropped (``CAPTURE``).
+
+    ``convert_soup`` is markdownify's hook for the parsed document: this one picks the
+    page's parts, prepares them and renders each; a table kept as HTML is rendered apart
+    and put back in place of a token. The elements markdownify hands over are Beautiful
+    Soup's, typed ``Any`` here.
+    """
+
+    def __init__(self, page: Page) -> None:
+        super().__init__(
+            heading_style=ATX, bullets="-", escape_underscores=False, newline_style=BACKSLASH
+        )
+        self.page = page
+        self.tables: list[str] = []
+
+    def convert_soup(self, soup: Any) -> str:
+        """Render the page's title and parts; stop on a page the script does not know."""
+        host = urlsplit(self.page.url).netloc
+        if host == DEVSITE:
+            title, parts = self._devsite(soup)
+        elif host == HELP_CENTER:
+            title, parts = self._help_article(soup)
+        else:
+            raise changed(self.page.url, f"no converter for {host}")
+        if title != self.page.title:
+            raise changed(self.page.url, f"the title is {title!r}, not {self.page.title!r}")
+        blocks = [f"# {title}"]
+        for part in parts:
+            self._prepare(part)
+            blocks.append(super().convert_soup(part).strip())
+        text = "\n\n".join(blocks)
+        for index, table in enumerate(self.tables):
+            token = _TOKEN.format(index)
+            if text.count(f"\n\n{token}\n\n") != 1:
+                raise changed(self.page.url, "a table kept as HTML is not a block of its own")
+            text = text.replace(token, table)
+        return text
+
+    def _one(self, soup: Any, selector: str) -> Any:
+        found = soup.select(selector)
+        if len(found) != 1:
+            raise changed(self.page.url, f"{len(found)} elements match {selector!r}, not one")
+        return found[0]
+
+    def _devsite(self, soup: Any) -> tuple[str, list[Any]]:
+        """developers.google.com: the title, the article's body and the content footer."""
+        heading = self._one(soup, "article h1.devsite-page-title")
+        for actions in heading.find_all("devsite-actions"):
+            actions.decompose()
+        title = " ".join(heading.get_text().split())
+        body = self._one(soup, "article div.devsite-article-body")
+        footer = self._one(soup, "devsite-content-footer")
+        if " ".join(footer.get_text().split()).count(DEVSITE_FOOTER) != 1:
+            raise changed(self.page.url, "the content footer does not print DEVSITE_FOOTER")
+        return title, [body, footer]
+
+    def _help_article(self, soup: Any) -> tuple[str, list[Any]]:
+        """The Gmail Help Center: the article's title and its text, ``div.cc``."""
+        heading = self._one(soup, "article section.article-container > h1")
+        title = " ".join(heading.get_text().split())
+        return title, [self._one(soup, "article div.article-content-container > div.cc")]
+
+    def _prepare(self, root: Any) -> None:
+        """Drop the chrome, make links absolute, keep merged tables as HTML (``CAPTURE``)."""
+        url = self.page.url
+        for element in root.find_all(True):
+            if element.decomposed:
+                continue
+            if element.name in _DROPPED or any(
+                name.startswith(_ICONS) for name in _classes(element)
+            ):
+                element.decompose()
+        for element in root.find_all(True):
+            if element.name in _UNWRAPPED:
+                element.unwrap()
+            elif "-" in element.name:
+                raise changed(url, f"an element <{element.name}> the script does not know")
+        for link in root.find_all("a", href=True):
+            link["href"] = urljoin(url, str(link["href"]).strip())
+        for image in root.find_all("img"):
+            if image.has_attr("src"):
+                image["src"] = urljoin(url, str(image["src"]).strip())
+            if image.has_attr("alt"):
+                image["alt"] = " ".join(str(image["alt"]).split())
+        for aside in root.find_all("aside"):
+            aside.name = "blockquote"
+        for table in root.find_all("table"):
+            if table.find_parent("table") is None and _merged(table):
+                self.tables.append(_html_table(url, table))
+                table.replace_with(_new_paragraph(table, _TOKEN.format(len(self.tables) - 1)))
+
+
+def _new_paragraph(anchor: Any, text: str) -> Any:
+    """A ``<p>`` holding ``text``, made by the document ``anchor`` belongs to."""
+    document = anchor
+    while document.parent is not None:
+        document = document.parent
+    paragraph = document.new_tag("p")
+    paragraph.string = text
+    return paragraph
+
+
+def _tidy(markdown: str) -> str:
+    """Outside fenced code: no trailing whitespace, no run of blank lines; one final newline."""
+    lines: list[str] = []
+    fenced = False
+    for line in markdown.strip().split("\n"):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        elif not fenced:
+            line = line.rstrip()
+            if not line and (not lines or not lines[-1]):
+                continue
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+def reduce(page: Page, response: Response) -> bytes:
+    """The content ``page``'s file is written with: Markdown, or the sorted discovery document.
+
+    An HTML page goes through ``_Markdown`` after its HTML comments are removed, and the
+    file starts with a line naming the URL it was converted from. The run stops with
+    ``changed``, before anything is written, on a page the converter does not recognise or
+    when the file would keep another number of HTML tables than ``HTML_TABLES`` says.
+    """
+    if page.file == SPEC_FILE:
+        return discovery(response)
+    converter = _Markdown(page)
+    markdown = converter.convert(_COMMENT.sub("", decode(response)))
+    expected = HTML_TABLES.get(page.file or "", 0)
+    if len(converter.tables) != expected:
+        found = len(converter.tables)
+        raise changed(page.url, f"{found} tables kept as HTML, where {expected} were known")
+    header = f"Converted by `scripts/refresh_upstream.py` from {page.url}; see `../FETCHED.md`."
+    return _tidy(f"{header}\n\n{markdown}").encode("utf-8")
 
 
 def capture(page: Page) -> Row:
@@ -354,13 +808,33 @@ def _note(row: Row) -> str:
     return "; ".join(parts) or "-"
 
 
+def _bullet(text: str) -> list[str]:
+    wrapped = textwrap.fill(
+        text,
+        width=88,
+        initial_indent="- ",
+        subsequent_indent="  ",
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    return wrapped.splitlines()
+
+
+def _attribution() -> list[str]:
+    """``FETCHED.md``'s Attribution: every recorded statement, as printed, and where."""
+    lines = _paragraph(
+        "The pages print these statements of a copyright, a licence or terms of use,",
+        "recorded as printed in `ATTRIBUTION` of `scripts/refresh_upstream.py`; the",
+        "discovery document states none:",
+    )
+    for statement in ATTRIBUTION:
+        linked = f", a link to {statement.link}" if statement.link else ""
+        lines += _bullet(f"`{statement.text}`{linked}: {statement.where}.")
+    return [*lines, ""]
+
+
 def render_fetched(rows: Sequence[Row], fetched: str) -> str:
     """The whole of ``FETCHED.md``, ``fetched`` being the UTC time the run started."""
-    if ATTRIBUTION:
-        stated = "The documentation states " + "; ".join(f"`{s}`" for s in ATTRIBUTION) + "."
-    else:
-        stated = "None stated: no page this script reads states a copyright line, a licence"
-        stated += " or terms of use."
     lines = [
         f"# Upstream documentation snapshot \N{EM DASH} {SOURCE_NAME}",
         "",
@@ -373,8 +847,8 @@ def render_fetched(rows: Sequence[Row], fetched: str) -> str:
         ),
         "## Attribution",
         "",
+        *_attribution(),
         *_paragraph(
-            stated,
             "The script stops when a page it reads states one it does not record. The",
             "documentation's text is reproduced here as this package's reference",
             "(ADR-0003); the publisher's objection is met by replacing it with a summary",
@@ -470,7 +944,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     out: Path = args.out
     pages = list(PAGES)
     if SPEC_URL:
-        pages.append(Page(SPEC_URL, SPEC_FILE, note="SPEC_URL, verbatim"))
+        pages.append(Page(SPEC_URL, SPEC_FILE, note=SPEC_NOTE, stable=False))
     if not pages:
         raise SystemExit(
             "Nothing to fetch: fill PAGES, and SPEC_URL where the documentation names an "
