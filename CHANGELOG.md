@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Adopts sdk-template v0.3.2, from v0.3.0.
 - `.copier-answers.yml` records sdk-template v0.3.2's answer `live_secrets` ahead of its
   adoption: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_DEMO_REFRESH_TOKEN`, the
   client pair and demo's refresh token that the nightly live tests read. The adoption then
