@@ -1,5 +1,5 @@
 # Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
-_commit: v0.3.0
+_commit: v0.3.2
 _src_path: https://github.com/xippios/sdk-template.git
 api_base_url: https://gmail.googleapis.com/gmail/v1/users/me
 api_key_env: ''
@@ -7,6 +7,7 @@ core_git_ref: ''
 core_version: 0.3.0
 gateway: none
 has_files: false
+human: jdidaskalu
 import_path: google.mail
 live_secrets: '[GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_DEMO_REFRESH_TOKEN]'
 rate_limit_burst: 10
