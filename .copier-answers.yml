@@ -8,6 +8,7 @@ core_version: 0.3.0
 gateway: none
 has_files: false
 import_path: google.mail
+live_secrets: '[GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_DEMO_REFRESH_TOKEN]'
 rate_limit_burst: 10
 rate_limit_per_minute: 60
 rate_limit_provenance: self-imposed

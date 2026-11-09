@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `.copier-answers.yml` records sdk-template v0.3.2's answer `live_secrets` ahead of its
+  adoption: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_DEMO_REFRESH_TOKEN`, the
+  client pair and demo's refresh token that the nightly live tests read. The adoption then
+  renders `live.yml` passing the three secrets from this answer, in place of the hand edit
+  that passes them today.
+
 ## [0.1.0] - 2026-10-29
 
 First release, on xippios-core 0.3.0 from PyPI (`~=0.3.0`), sdk-template v0.3.0 and the
