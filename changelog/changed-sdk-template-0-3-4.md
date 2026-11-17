@@ -1,0 +1,1 @@
+- Adopts sdk-template v0.3.4, from v0.3.2. (https://github.com/xippios/sdk-template/releases/tag/v0.3.4, https://github.com/xippios/sdk-google-mail/issues/16)
