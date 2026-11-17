@@ -1,10 +1,10 @@
 # sdk-google-mail — instructions for Claude Code
 
 `xippios-google-mail` wraps Gmail as a typed Python client, an MCP server
-and FastAPI routes, built on `xippios-core`. This file holds the facts of this package;
-the family rules every source shares are in `.claude/family.md`, which the next line imports.
-
-@.claude/family.md
+and FastAPI routes, built on `xippios-core`. This file holds what an agent needs to work on
+the package: what it wraps, its layout, its commands and its code rules. The documents it
+follows, sdk-core's conventions among them, are listed under
+[`## Documents` in the README](README.md#documents); read them before you change a file.
 
 ## What this package wraps
 
@@ -14,10 +14,11 @@ the family rules every source shares are in `.claude/family.md`, which the next 
 | API base URL | `https://gmail.googleapis.com/gmail/v1/users/me` |
 | Documentation | Gmail's discovery document, https://gmail.googleapis.com/$discovery/rest?version=v1, which the REST reference https://developers.google.com/workspace/gmail/api/reference/rest names (`SPEC_URL` of `scripts/refresh_upstream.py`), kept as `docs/upstream/discovery.json` with its keys sorted; beside it, as Markdown under `docs/upstream/pages/`, the usage limits, the errors, the scopes, the Gmail Help article on search operators and Google's OAuth 2.0 overview and guides for desktop apps and web server applications (`/refresh-upstream`) |
 | Credentials | an OAuth 2.0 bearer renewed from a refresh token per account: the operator's Desktop-app client `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, the account list `GOOGLE_ACCOUNTS` and one `GOOGLE_<NAME>_REFRESH_TOKEN` per account (`demo` declared by `GOOGLE_DEMO_REFRESH_TOKEN` alone, never listed), from the environment, the registry `TENANTS` in `_client.py`; `RefreshTokenAuth` (`_auth.py`, queue row 252) exchanges the refresh token at `POST https://oauth2.googleapis.com/token`, keeps the access token, its expiry and the granted scopes in memory and sends the access token as a bearer, renewing it within 60 s of its expiry and once more on a 401; nothing is written to disk; a refresh token comes from `xippios-google-mail-auth` (`_consent.py`), for the scope set `read` (`gmail.readonly`) or `write` (`gmail.modify`); the nightly `live.yml` passes the client pair and demo's token as org secrets |
-| Rate limit | 60 requests per minute, burst 10, a self-imposed pace per account, enforced client-side in `_client.py` (`RATE_LIMIT`, one token bucket per account client); upstream documents a quota in units, 6,000 per minute per user per project and 1,200,000 per minute per project, with the units per method on the quota page, `docs/upstream/pages/quota.md` (`getProfile` 1; `messages.get` 20, 60 with `format=full`, its default; `threads.get` 40, 120 with `format=full`, its default), so 60 full `threads.get` in a minute (7,200 units) would exceed the per-user quota; the backstop is a `QuotaPolicy` per account (`account_config`, ADR-0010, ADR-0015; queue rows 143 and 299) that reads upstream's 403 `rateLimitExceeded` and `userRateLimitExceeded` (Gmail documents no quota header and no `Retry-After`) and holds the account's requests back for 60 s, which `classify` maps to `RateLimitError` with `retry_after` 60 s, `dailyLimitExceeded` with 3,600 s |
+| Rate limit | 60 requests per minute, burst 10, a self-imposed pace per account, enforced client-side in `_client.py` (`RATE_LIMIT`, one token bucket per account client); upstream documents a quota in units, 6,000 per minute per user per project and 1,200,000 per minute per project, with the units per method on the quota page, `docs/upstream/pages/quota.md` (`getProfile` 1; `messages.get` 20, 60 with `format=full`, its default; `threads.get` 40, 120 with `format=full`, its default), so 60 full `threads.get` in a minute (7,200 units) would exceed the per-user quota; the backstop is a `QuotaPolicy` per account (`account_config`, sdk-core ADR-0010, sdk-core ADR-0015; queue rows 143 and 299) that reads upstream's 403 `rateLimitExceeded` and `userRateLimitExceeded` (Gmail documents no quota header and no `Retry-After`) and holds the account's requests back for 60 s, which `classify` maps to `RateLimitError` with `retry_after` 60 s, `dailyLimitExceeded` with 3,600 s |
 | Write tools | yes: `create_draft`, `delete_draft`, `send_message`, `modify_message` and `trash_message` in `tasks_write.py`, served by the write server's entry point `xippios-google-mail-mcp-write` (`mcp_write.py`, registered with `read_only=False`, so core keeps `--http` on loopback without `--allow-remote`), never by the read server or the HTTP router; each takes `account` first and `confirm: bool = False` last, and without `confirm=True` sends nothing to the write endpoint and returns a preview; they need the account's `write` grant (`gmail.modify`) |
 
-The snapshot listed in `docs/upstream/FETCHED.md` is the reference for names, parameters and semantics.
+The snapshot listed in `docs/upstream/FETCHED.md` is the reference for names, parameters and
+semantics; a wrapper is never written from memory of the API.
 
 ## Layout
 
@@ -34,7 +35,8 @@ src/xippios/google/mail/
   _account_lock.py the --account lock, AccountLock and bind_tasks, copied from
                    sdk-cashctrl's _org_lock.py (queue row 281)
   _cli.py          serve: --account through core's option hooks, for both servers, and
-                   the read server's loopback rule (ADR-0025 D-a; queue rows 281, 282)
+                   the read server's loopback rule (sdk-core ADR-0025 D-a; queue rows
+                   281, 282)
   _consent.py      xippios-google-mail-auth, the loopback PKCE consent that prints a
                    refresh token once
   _compose.py      the RFC 2822 text a write task sends (EmailMessage, 7-bit, CRLF; no
@@ -46,10 +48,13 @@ src/xippios/google/mail/
                    tree, Thread, Draft, ModifyMessageRequest, ...), the projections the
                    read tasks return (DecodedMessage and its Attachment, SearchRow) and
                    the write tasks' previews (ComposePreview, ActionPreview) and
-                   DraftDeleted
-  _decode.py       decode_message, the decoded view of a message's MIME tree (ADR-0025)
-  api/             endpoint wrappers, one module per upstream operation, named by its
-                   method id minus the shared gmail.users. (conventions §2): get_profile,
+                   DraftDeleted; by the family's precedent also an enumeration written
+                   by hand, for a value set upstream documents and no packaged list
+                   renders
+  _decode.py       decode_message, the decoded view of a message's MIME tree
+                   (sdk-core ADR-0025)
+  api/             endpoint wrappers, one module per upstream operation (conventions §2),
+                   named by its method id minus the shared gmail.users.: get_profile,
                    labels_list, messages_list, messages_get, threads_get and
                    messages_attachments_get, the last without a task in 0.1.0; the
                    writes drafts_create, drafts_delete, messages_send, messages_modify
@@ -75,6 +80,8 @@ scripts/
                          a task run for demo, into tests/fixtures/, a write task under
                          the write safety rule, scrubbed and checked before the one
                          write (/record-fixture)
+  adr_index.py           writes docs/adr.md and docs/adr.json from the records in docs/adr/;
+                         --check fails while either is stale
 tests/
   conftest.py      enables xippios.core.testing.plugin, which keeps the run offline,
                    strips every account but demo at import (queue row 281), and holds a
@@ -107,25 +114,42 @@ tests/
                    offline
   test_live.py     @pytest.mark.live smoke tests, one per task, against demo only; the
                    write tasks in two sequences that write to demo itself and clean up
-docs/upstream/     documentation snapshot and FETCHED.md
-.github/workflows/ ci.yml (the required ci check, with the CHANGELOG and fixture-size steps),
+docs/
+  upstream/        documentation snapshot and FETCHED.md
+  adr/             this package's design decisions, one NNNN-<slug>.md record each, laid
+                   out in its README.md
+  adr.md           the index of the decisions, written by scripts/adr_index.py, never by hand
+  adr.json         the same index, for machines
+  reports/         dated reports, the evidence a decision cites, laid out in its README.md
+changelog/         the next release's changelog entries, one fragment per change, laid out
+                   in its README.md
+CHANGELOG.md       the releases, each section assembled from the fragments
+.github/workflows/ ci.yml (the required ci check, with the changelog and fixture-size steps),
                    publish.yml (the release train: tag, build, PyPI), live.yml (nightly live
-                   tests), gates.yml (the merge gates as jobs, off until GATES_CALLER is 1)
-                   siblings.yml (the sibling proof of ADR-0006: this wheel beside the
+                   tests), organization.yml (the organization's checks from xippios/.github:
+                   conventions, a review of a pull request against the documents the README
+                   lists, and adr-index, which runs scripts/adr_index.py --check),
+                   siblings.yml (the sibling proof of sdk-core ADR-0006: this wheel beside the
                    siblings under xippios.google, a visible check the ruleset does not require)
 .github/scripts/   check-siblings.sh, which siblings.yml runs; the template's, as is the workflow
-.claude/family.md  the family rules, the template's, imported above
-.claude/commands/  add-endpoint, record-fixture, refresh-upstream, refresh-reference-data, release-prep,
-                   adopt-release
+.claude/commands/  add-endpoint, record-fixture, refresh-upstream, refresh-reference-data, release-prep
 ```
 
-The import path is `xippios.google.mail` (ADR-0006); `src/xippios/` is a namespace
-package, and so is `src/xippios/google/`, the provider level.
+The import path is `xippios.google.mail` (sdk-core ADR-0006); `src/xippios/` is a
+namespace package, and so is `src/xippios/google/`, the provider level.
+Where the API's operation ids repeat across its services, `api/` keeps one module per service
+instead, named after the service, and this Layout says so (conventions §2).
 
 ## Commands
 
 ```bash
-XIPPIOS_LIVE_TESTS=1 direnv exec ~/github/sdk uv run pytest -m live --tb=short   # demo only
+uv sync --all-extras
+uv run pytest                      # offline, replays the fixtures
+uv run ruff check . && uv run ruff format --check .
+uv run mypy
+uv run pre-commit run --all-files
+python3 scripts/adr_index.py --check   # the index matches the records in docs/adr/
+uv run pytest -m live --tb=short --assert=plain   # needs XIPPIOS_LIVE_TESTS=1, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_DEMO_REFRESH_TOKEN; demo only
 
 uv run xippios-google-mail-mcp-read   # stdio; --http for streamable HTTP, on loopback
 uv run xippios-google-mail-mcp-read --account demo   # bound to one account
@@ -141,10 +165,22 @@ direnv exec ~/github/sdk uv run scripts/record_fixture.py send_message ok \
   'subject=xippios-live send' body=hi confirm=true   # a write task, to demo itself
 ```
 
+`uv run pytest` is offline: core's plugin refuses the network and skips the rate limiter's
+waits in every test not marked `live` (conventions §10, sdk-core ADR-0013). A test that
+asserts a limiter wait or a quota pause is marked `rate_limited`, one that must reach the
+network `network`.
+
 `.github/workflows/live.yml` runs the live tests nightly at 02:37 UTC, a time derived from
-the slug. It passes the three org secrets `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and
-`GOOGLE_DEMO_REFRESH_TOKEN` by hand, since the template renders `_API_KEY` secrets only
-(queue row 255). Offline, core's plugin sets those three to its placeholder
+the slug, and on demand; a pull request never runs them. Only its
+`uv run pytest -m live --tb=short --assert=plain` step sees `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET` and `GOOGLE_DEMO_REFRESH_TOKEN`, each from the secret of the same
+name, as the `live_secrets` answer in `.copier-answers.yml` names them. Every live run
+takes `--tb=short --assert=plain`, since the log of `live.yml` is public: the first keeps a
+failing test's frame arguments out of it, a raw upstream payload among them, and the second
+the values a failed `assert` compares. A live test asserts on shapes and counts, never on a
+raw payload.
+
+Offline, core's plugin sets those three to its placeholder
 (`xippios_placeholder_key_envs` in `pyproject.toml`), and every Gmail fixture replays the
 refresh, `tests/fixtures/oauth2_token/ok.json`, before it, a write fixture
 `oauth2_token/write.json`, the refresh under the write grant. Demo holds the write set,
@@ -152,6 +188,65 @@ refresh, `tests/fixtures/oauth2_token/ok.json`, before it, a write fixture
 tests need: consented with the read scopes on 2026-10-29 and, that grant revoked, with
 `--scopes write` the same day, under a consent screen in Testing status, whose grants
 live seven days: a refresh answered `invalid_grant` means a new consent, by hand.
+
+## Code rules
+
+- Three layers (sdk-core ADR-0001, conventions §2): endpoint wrappers in `api/`, task
+  functions in `tasks.py`, adapters in `mcp.py` and `http.py`. The adapters register
+  `tasks.__all__` and call only tasks, the tasks call only wrappers and reference data, and
+  a wrapper returns models.
+- Upstream's documented error shapes go into `classify` in `_client.py`, once, and an error
+  class of the package's own into `errors.py`; a wrapper never inspects a status code
+  (conventions §5, §6).
+- A change brings its tests, written before the code, and passes the offline checks above;
+  its changelog entry is a fragment under `changelog/`, one file holding its bullet, as
+  `changelog/README.md` lays it out (conventions §12). Commit subjects follow Conventional
+  Commits (conventions §13): the rule binds a pull request's own commits, not the commit
+  that lands the pull request on `main`, whose subject GitHub writes.
+- `ruff` leaves `docs/` and `.claude/` alone (`pyproject.toml`), so the upstream snapshot
+  keeps its bytes: never reformat it.
+- A convention that seems wrong is followed anyway and said in the pull request; changing
+  it is a change of sdk-core's `docs/conventions.md` with an ADR.
+
+## Never
+
+- Never hand-write a fixture, and never commit one without grepping it for key patterns
+  (conventions §10).
+- Never read or print `.envrc`, `.env`, the credential variables of this package,
+  `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_DEMO_REFRESH_TOKEN` and every other
+  `GOOGLE_<NAME>_REFRESH_TOKEN`, or any variable ending in `_API_KEY`, `_REFRESH_TOKEN` or
+  `_SECRET`.
+- Never write a key, a token or another credential into a file or a commit.
+- Never put logic in `mcp.py` or `http.py`, and never add a route or a tool by hand: the
+  adapters register `tasks.__all__` (sdk-core ADR-0001).
+- Never rename or re-map an upstream concept to another source's (sdk-core ADR-0003).
+- Never return a documented personal identifier in a task's projection, echo one in
+  `meta.request`, or commit one in a fixture (sdk-core ADR-0017).
+- Never edit `docs/upstream/` by hand: `/refresh-upstream` fetches it, and the pull request
+  shows its diff (conventions §3).
+- Never add `src/xippios/__init__.py`, nor an `__init__.py` at a level between it and the
+  package (sdk-core ADR-0006).
+- Never push a tag by hand: a release's tag comes from `publish.yml` alone (conventions §12).
+
+## Template updates
+
+This repository is generated from sdk-template, at the tag `.copier-answers.yml` records. A
+template release reaches it in a pull request of its own, with
+`uvx --from 'copier>=9.19' copier update --defaults --vcs-ref=<tag>` (conventions §15): the
+update renders the template's files again and never overwrites the files this package
+fills, `__init__.py`, `_client.py`, `errors.py`, `models.py`, `api/`, `parse/`, `tasks.py`,
+`params.py`, `enums.py`, `reference/`, `scripts/refresh_reference.py`,
+`scripts/refresh_upstream.py`, `tests/test_tasks.py`, `tests/test_live.py`,
+`tests/fixtures/`, `docs/upstream/`, `docs/adr.md`, `docs/adr.json`, `README.md`,
+`CHANGELOG.md` and `CLAUDE.md`. sdk-template's
+[CHANGELOG](https://github.com/xippios/sdk-template/blob/main/CHANGELOG.md) says, per
+release, what to port into those by hand in the same pull request.
+
+## When something is unclear
+
+Prefer the smallest change that satisfies the documents the README lists, state the
+assumption in the pull request's description, and stop rather than guess at upstream
+semantics or the shape of the public API.
 
 ## Gmail specifics
 
@@ -168,7 +263,8 @@ hand: `scripts/record_fixture.py` records through `client_for("demo")` only, wit
 then its own step (encoded forms, token fields by key, every address to
 `user@example.com`), and checks for Google's token shapes (`ya29.`, `1//`, `GOCSPX-`,
 `apps.googleusercontent.com`) before the one write. A message or thread answer is read as
-JSON first (`MessageScrub`, the list of the Gmail investigation that ADR-0025 rests on):
+JSON first (`MessageScrub`, the list of the Gmail investigation that sdk-core ADR-0025
+rests on):
 every part's headers cut to From, To, Cc, Bcc, Date, Subject, Message-ID, In-Reply-To,
 References, Content-Type and MIME-Version, so `Received`, `ARC-*`, `DKIM-Signature` and
 `X-Google-*` go; each id of a
@@ -191,7 +287,7 @@ a fixture that carries one needs an audited `.secrets.baseline` entry.
 ### The decoded view
 
 `get_message` makes one `messages.get` call with `format=full` and returns a
-`DecodedMessage`, the decoded view of ADR-0025 ("The decoded view"), built by
+`DecodedMessage`, the decoded view of sdk-core ADR-0025 ("The decoded view"), built by
 `_decode.decode_message`: decoding the MIME tree is parsing a value, conventions §3's one
 permitted override, and the view picks the parts by MIME role; the faithful tree stays on
 the wrapper's `Message.payload`. `headers` keeps the top-level part's From, To, Cc, Bcc,
@@ -204,13 +300,14 @@ attachment: `attachments` lists its `part_id`, `filename`, `mime_type`, `size` a
 `attachment_id`, never its content, and the walk does not descend into it. Over the result cap a
 message, no list, comes back as the result's first 64 KB and a note of the tool's own
 (`MCP_CAPS["get_message"]`): its text or html is cut, `include_html=False` gives the text
-alone, and no `start` resumes it (ADR-0025, ADR-0016). `get_thread`
+alone, and no `start` resumes it (sdk-core ADR-0025, sdk-core ADR-0016). `get_thread`
 returns the views of a thread's messages, text only, from `start`, at most `limit`, and
 records `start` in `meta.request`, so core's cut note ends `; resume with start=<start +
 shown>` (conventions §8). `search_messages` reads at most 50 messages (`SEARCH_MAX_RESULTS`,
-in the task for every caller, ADR-0001): a list and one `format=metadata` call per id, 5 +
-20 units each, 1,005 for 50. No task reports `meta.total`: Gmail's `resultSizeEstimate` is
-an estimate, kept as a data field of `list_messages` (ADR-0012).
+in the task for every caller, sdk-core ADR-0001): a list and one `format=metadata` call per
+id, 5 + 20 units each, 1,005 for 50. No task reports `meta.total`: Gmail's
+`resultSizeEstimate` is an estimate, kept as a data field of `list_messages` (sdk-core
+ADR-0012).
 
 ### The write tools and the write safety rule
 
@@ -227,7 +324,8 @@ Message-ID), Bcc kept in the text (`messages.send` reads the recipients from To,
 Bcc), `raw` base64url without padding. A reply sets `threadId`, In-Reply-To (the
 original's Message-ID), References (its References and Message-ID) and, for an empty
 subject, `Re: <original>`, the discovery document's rule for joining a thread.
-`meta.request` holds the parameters and the `threadId`, never the `body` (ADR-0017).
+`meta.request` holds the parameters and the `threadId`, never the `body` (sdk-core
+ADR-0017).
 
 The write safety rule binds the recorder and the live tests: demo writes to itself only.
 Its own address comes from `users.getProfile` at runtime (1 unit), never from a file, a
@@ -246,9 +344,9 @@ throwaway mailbox: nothing else is written.
 Every task takes `account` first; `list_accounts` names the declared accounts, names only.
 `--account <name>` binds either server, the read or the write one, to one account
 (`_account_lock`, through `_cli.serve`). `--http` serves the read server on a loopback
-`--host` only unless `--allow-remote` is passed (ADR-0025 D-a), since it reaches every
-declared mailbox and carries no authentication, and core's `main` holds the write server
-to the same rule (ADR-0014, decision 9). Upstream enforces a grant's
+`--host` only unless `--allow-remote` is passed (sdk-core ADR-0025 D-a), since it reaches
+every declared mailbox and carries no authentication, and core's `main` holds the write
+server to the same rule (sdk-core ADR-0014, decision 9). Upstream enforces a grant's
 scopes: a call the grant does not cover is answered HTTP 403 `insufficientPermissions` with
 `WWW-Authenticate: Bearer error="insufficient_scope", scope="..."` (recorded 2026-10-29;
 Gmail's error page says 401 `authError`), which `classify` maps to the `AuthError`
