@@ -44,6 +44,7 @@ from xippios.core.testing import (
     load_fixture,
     mcp_call,
     mcp_call_text,
+    sent_bodies,
     sent_urls,
 )
 
@@ -90,11 +91,6 @@ def recorded(endpoint: str, case: str) -> Fixture:
 def answer(endpoint: str, case: str) -> Any:
     """The recorded answer's JSON."""
     return json.loads(recorded(endpoint, case).response.body)
-
-
-def sent_body(route: respx.Route) -> Any:
-    """The JSON body the last call of ``route`` sent; it carries no credential."""
-    return json.loads(route.calls.last.request.content)
 
 
 def decoded(raw: str) -> EmailMessage:
@@ -520,7 +516,7 @@ def test_create_draft_stores_the_message_as_a_draft(replay_fixture: ReplayFixtur
     assert draft.message is not None
     assert draft.message.id == expected["message"]["id"]
     assert "DRAFT" in draft.message.label_ids
-    sent = sent_body(route)
+    sent = sent_bodies(route)[-1]
     assert set(sent) == {"message"}
     assert set(sent["message"]) == {"raw"}, "no threadId for a new conversation"
     message = decoded(sent["message"]["raw"])
@@ -581,7 +577,7 @@ def test_send_message_sends_it(replay_fixture: ReplayFixture) -> None:
     assert (sent_message.id, sent_message.thread_id) == (expected["id"], expected["threadId"])
     assert sent_message.label_ids == expected["labelIds"]
     assert "SENT" in sent_message.label_ids
-    sent = sent_body(route)
+    sent = sent_bodies(route)[-1]
     assert set(sent) == {"raw"}
     message = decoded(sent["raw"])
     assert (message["To"], message["Subject"]) == (OWN, subject)
@@ -609,7 +605,7 @@ def test_trash_message_moves_it_to_the_trash(replay_fixture: ReplayFixture) -> N
     assert isinstance(result.data, Message)
     assert result.data.id == expected["id"]
     assert "TRASH" in result.data.label_ids
-    assert route.calls.last.request.content == b"", "trash takes no body"
+    assert sent_bodies(route)[-1] is None, "trash takes no body"
     assert_meta(result, "gmail.users.messages.trash", {"id": expected["id"]})
 
 
@@ -641,7 +637,7 @@ def test_modify_message_adds_and_removes_labels(replay_fixture: ReplayFixture) -
     assert "STARRED" in result.data.label_ids
     assert "UNREAD" not in result.data.label_ids
     body = {"addLabelIds": ["STARRED"], "removeLabelIds": ["UNREAD"]}
-    assert sent_body(route) == body
+    assert sent_bodies(route)[-1] == body
     assert json.loads(recorded("modify_message", "ok").request.body or "") == body
     assert_meta(
         result,
@@ -743,7 +739,7 @@ def test_a_confirmed_reply_joins_the_thread(replay_fixture: ReplayFixture) -> No
     tasks_write.create_draft(
         DEMO, [OWN], "", BODY, in_reply_to_message_id=original["id"], confirm=True
     )
-    sent = sent_body(created)
+    sent = sent_bodies(created)[-1]
     assert sent["message"]["threadId"] == original["threadId"]
     message = decoded(sent["message"]["raw"])
     assert message["In-Reply-To"] == headers["message-id"]
