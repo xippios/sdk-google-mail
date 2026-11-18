@@ -34,15 +34,12 @@ from typing import Any
 import httpx
 import pytest
 import respx
-from fastapi import APIRouter
-from mcp.server.mcpserver import MCPServer
 from xippios.core import InvalidRequestError, Result
-from xippios.core.http import router_from_tasks
-from xippios.core.mcp import build_server, tool_name
-from xippios.core.mcp.server import is_write_server, register_tasks
+from xippios.core.mcp import is_write_server, tool_name
 from xippios.core.testing import (
     Fixture,
     ReplayFixture,
+    assert_write_tools,
     fixture_path,
     load_fixture,
     mcp_call,
@@ -162,102 +159,6 @@ def test_every_write_task_returns_a_preview_or_upstream_s_answer(
 
 
 # The write server --------------------------------------------------------------------
-# Queue row 281: assert_write_tools, _confirm_problem, _tool_names and _serves are a copy
-# of sdk-cashctrl's tests/test_tasks_write.py at 6db155b9f80e20b17b1533db66134b9eb2144c46
-# (main, release 0.3.0), the kit's piece (d), which returns to xippios-core in 0.4.0 with
-# its two consumers (ADR-0023, decision 4; ADR-0025, D-d); this package adopts it at
-# 0.2.0. sdk-cashctrl copied it from xippios-core, which removed it in 0.3.0 (ADR-0024;
-# sdk-core cb8ecdf, src/xippios/core/testing/adapters.py), with _confirm_problem from its
-# src/xippios/core/mcp/server.py, and extended it with the check that confirm is the
-# last parameter (queue row 26 f). The family check no longer tests a write server; this
-# does. Async here: core listed the tools on its private background loop.
-
-
-def _confirm_problem(fn: Callable[..., Any]) -> str | None:
-    """Why ``fn`` does not take ``confirm: bool = False`` last, or ``None`` when it does.
-
-    The annotation is resolved with ``typing.get_type_hints``, so a string annotation
-    and ``Annotated[bool, ...]`` count as ``bool``; ``bool | None`` does not.
-    """
-    parameters = inspect.signature(fn).parameters
-    parameter = parameters.get("confirm")
-    if parameter is None:
-        return "no parameter confirm"
-    annotation = typing.get_type_hints(fn).get("confirm", parameter.annotation)
-    if annotation is inspect.Parameter.empty:
-        return "confirm is not annotated"
-    if annotation is not bool:
-        return f"confirm is annotated {annotation!r}, not bool"
-    if parameter.default is inspect.Parameter.empty:
-        return "confirm has no default"
-    if parameter.default is not False:
-        return f"confirm defaults to {parameter.default!r}, not False"
-    if list(parameters)[-1] != "confirm":
-        return "confirm is not the last parameter"
-    return None
-
-
-async def _tool_names(server: MCPServer) -> set[str]:
-    return {tool.name for tool in await server.list_tools()}
-
-
-def _serves(route: Any, source: str, fn: Callable[..., Any]) -> bool:
-    """True when ``route`` is the one ``router_from_tasks`` builds for ``fn``.
-
-    ``router_from_tasks`` names it ``<source>_<function>`` and puts it at
-    ``<prefix>/<function>``; either is enough, so a custom prefix is caught too.
-    """
-    named = getattr(route, "name", None) == f"{source}_{fn.__name__}"
-    return named or str(getattr(route, "path", "")).endswith(f"/{fn.__name__}")
-
-
-async def assert_write_tools(
-    write_server: MCPServer,
-    write_tasks: list[Callable[..., Any]],
-    *,
-    source: str,
-    read_server: MCPServer | None = None,
-    router: APIRouter | None = None,
-) -> None:
-    """Check a write server against its write tasks (conventions §8).
-
-    Fails the test, naming the offending tool, unless all of these hold:
-
-    - the write server was registered with ``read_only=False`` (``is_write_server``),
-      which ``main``'s loopback rule for ``--http`` depends on;
-    - the write server's tools are exactly ``tool_name(source, fn)`` for the write
-      tasks, no more and no fewer;
-    - every write task takes ``confirm: bool = False`` as its last parameter, so a call
-      without it is a dry run;
-    - no write tool is on ``read_server``, and no route of ``router`` serves a write
-      task (matched by the route name and path ``router_from_tasks`` gives it), when
-      given.
-
-    A write server exposes write tools only: reference tools, the account list among
-    them, stay on the read server.
-    """
-    assert is_write_server(write_server), (
-        "the write server was not registered with read_only=False; the loopback rule depends on it"
-    )
-    expected = {tool_name(source, fn): fn for fn in write_tasks}
-    listed = await _tool_names(write_server)
-    unexpected = sorted(listed - expected.keys())
-    assert not unexpected, f"write server tools that are not write tasks: {unexpected}"
-    missing = sorted(expected.keys() - listed)
-    assert not missing, f"write tasks missing from the write server: {missing}"
-    for name, fn in expected.items():
-        problem = _confirm_problem(fn)
-        assert problem is None, f"{name}: {problem}; a write tool takes confirm: bool = False last"
-    if read_server is not None:
-        on_read = sorted(expected.keys() & await _tool_names(read_server))
-        assert not on_read, f"write tools on the read server: {on_read}"
-    if router is not None:
-        for name, fn in expected.items():
-            for route in router.routes:
-                path = str(getattr(route, "path", ""))
-                methods = " ".join(sorted(getattr(route, "methods", None) or ()))
-                served = _serves(route, source, fn)
-                assert not served, f"{name}: a write task has an HTTP route, {methods} {path}"
 
 
 @pytest.mark.anyio
@@ -283,7 +184,7 @@ async def test_the_read_server_is_no_write_server_and_keeps_its_tools() -> None:
     assert is_write_server(write_server)
     assert not is_write_server(read_server)
     expected = {tool_name(SOURCE, getattr(tasks, name)) for name in tasks.__all__}
-    assert await _tool_names(read_server) == expected
+    assert {tool.name for tool in await read_server.list_tools()} == expected
     assert write_server.name == read_server.name == f"xippios-{SOURCE}", "core's default"
 
 
@@ -302,149 +203,6 @@ async def test_write_tools_take_their_task_s_parameters_and_say_they_write() -> 
         ), name
     read_tools = await read_server.list_tools()
     assert all(tool.annotations and tool.annotations.read_only_hint for tool in read_tools)
-
-
-def create_thing(name: str, confirm: bool = False) -> dict[str, str]:
-    """Create a thing; without confirm, return a preview.
-
-    Args:
-        name: The thing's name, e.g. ``"Corn"``.
-        confirm: ``True`` writes, ``False`` previews.
-    """
-    return {"name": name, "written": str(confirm)}
-
-
-def delete_thing(thing_id: int, confirm: typing.Annotated[bool, "write"] = False) -> dict[str, int]:
-    """Delete a thing; without confirm, return a preview.
-
-    Args:
-        thing_id: The thing's id, e.g. ``4``.
-        confirm: ``True`` deletes, ``False`` previews.
-    """
-    return {"id": thing_id}
-
-
-def list_things() -> list[str]:
-    """List the things."""
-    return ["a"]
-
-
-WRITE: list[Callable[..., Any]] = [create_thing, delete_thing]
-READ: list[Callable[..., Any]] = [list_things]
-
-
-@pytest.mark.anyio
-async def test_assert_write_tools_accepts_a_separate_write_server() -> None:
-    await assert_write_tools(
-        build_server("example", WRITE, read_only=False),
-        WRITE,
-        source="example",
-        read_server=build_server("example", READ),
-        router=router_from_tasks("example", READ),
-    )
-
-
-@pytest.mark.anyio
-async def test_assert_write_tools_wants_a_server_registered_as_a_write_server() -> None:
-    read_only = build_server("example", [])
-    register_tasks(read_only, "example", WRITE)  # the write tasks, registered read-only
-    with pytest.raises(
-        AssertionError,
-        match=(
-            r"^the write server was not registered with read_only=False; "
-            r"the loopback rule depends on it"
-        ),
-    ):
-        await assert_write_tools(read_only, WRITE, source="example")
-
-
-@pytest.mark.anyio
-async def test_assert_write_tools_wants_exactly_the_write_tasks() -> None:
-    write = build_server("example", WRITE, read_only=False)
-    register_tasks(write, "example", [list_things])
-    with pytest.raises(AssertionError, match=r"not write tasks: \['example_list_things'\]"):
-        await assert_write_tools(write, WRITE, source="example")
-    write = build_server("example", [create_thing], read_only=False)
-    with pytest.raises(AssertionError, match=r"missing .*: \['example_delete_thing'\]"):
-        await assert_write_tools(write, WRITE, source="example")
-
-
-def no_confirm(name: str) -> None:
-    """No confirm at all."""
-
-
-def confirm_true(confirm: bool = True) -> None:
-    """Writes unless told not to."""
-
-
-def confirm_required(confirm: bool) -> None:
-    """Must be told."""
-
-
-def confirm_unannotated(confirm=False):  # type: ignore[no-untyped-def]
-    """Not annotated."""
-
-
-def confirm_optional(confirm: bool | None = False) -> None:
-    """Optional."""
-
-
-def confirm_zero(confirm: int = 0) -> None:
-    """An int."""
-
-
-def confirm_first(confirm: bool = False, name: str = "") -> None:
-    """Confirm before the other parameters."""
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize(
-    ("task", "problem"),
-    [
-        (no_confirm, "no parameter confirm"),
-        (confirm_true, "confirm defaults to True, not False"),
-        (confirm_required, "confirm has no default"),
-        (confirm_unannotated, "confirm is not annotated"),
-        (confirm_optional, r"confirm is annotated bool \| None, not bool"),
-        (confirm_zero, "confirm is annotated <class 'int'>, not bool"),
-        (confirm_first, "confirm is not the last parameter"),
-    ],
-)
-async def test_assert_write_tools_wants_confirm_false_last(
-    task: Callable[..., Any], problem: str
-) -> None:
-    write = build_server("example", [create_thing], read_only=False)
-    register_tasks(write, "example", [task])  # build_server(read_only=False) refuses most
-    with pytest.raises(AssertionError, match=f"^example_{task.__name__}: {problem}; "):
-        await assert_write_tools(write, [create_thing, task], source="example")
-
-
-@pytest.mark.anyio
-async def test_assert_write_tools_keeps_write_tools_off_the_read_adapters() -> None:
-    write = build_server("example", WRITE, read_only=False)
-    read = build_server("example", [list_things, delete_thing])
-    with pytest.raises(AssertionError, match=r"on the read server: \['example_delete_thing'\]"):
-        await assert_write_tools(write, WRITE, source="example", read_server=read)
-    with_write = router_from_tasks("example", [list_things, create_thing])
-    with pytest.raises(
-        AssertionError,
-        match=r"^example_create_thing: a write task has an HTTP route, GET /example/create_thing",
-    ):
-        await assert_write_tools(write, WRITE, source="example", router=with_write)
-    prefixed = router_from_tasks("example", [delete_thing], prefix="/v1")
-    with pytest.raises(AssertionError, match=r"^example_delete_thing: .* GET /v1/delete_thing"):
-        await assert_write_tools(write, WRITE, source="example", router=prefixed)
-
-
-@pytest.mark.anyio
-async def test_assert_write_tools_names_tools_with_the_underscored_source() -> None:
-    write = build_server("google-mail", WRITE, read_only=False)
-    await assert_write_tools(
-        write, WRITE, source="google-mail", router=router_from_tasks("google-mail", READ)
-    )
-    with_write = router_from_tasks("google-mail", WRITE)
-    with pytest.raises(AssertionError, match=r"^google_mail_create_thing: "):
-        await assert_write_tools(write, WRITE, source="google-mail", router=with_write)
 
 
 # The composer, on messages built in memory -------------------------------------------
