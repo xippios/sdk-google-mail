@@ -1,13 +1,11 @@
-# Queue row 252: the renewing bearer, whose first consumer is sdk-faostat's LoginAuth and
-# this refresh its second; core 0.4.0 takes a renewing-bearer base with the two token
-# requests (ADR-0023, decision 2; ADR-0025, D-b). Until then this module is the source's.
 """The renewing bearer: an account's refresh token exchanged for an access token in memory.
 
 ADR-0025, D-b. Every account has a long-lived refresh token, ``GOOGLE_<NAME>_REFRESH_TOKEN``,
 issued to the operator's Desktop-app OAuth client when the account consented
 (``xippios-google-mail-auth``). ``RefreshTokenAuth`` is the ``httpx.Auth`` of the account's
-client: its key (``EnvKeyAuth.key``) is the refresh token, and its ``auth_flow`` exchanges
-it at Google's token endpoint for a short-lived access token, which it sends as
+client, a subclass of core's ``RenewingBearerAuth``: its credential
+(``RenewingBearerAuth.credential``) is the refresh token, and core's flow exchanges it at
+Google's token endpoint for a short-lived access token, which it sends as
 ``Authorization: Bearer``. The exchange is the refresh request of
 ``docs/upstream/pages/oauth2-web-server.md`` ("Refreshing an access token", HTTP/REST):
 ``POST https://oauth2.googleapis.com/token`` with the form fields ``client_id``,
@@ -25,8 +23,8 @@ Nothing is written to disk: the access token, when it lapses and the granted sco
 in the auth object's memory, one per account client (``_client.client_for``), and go with
 it. The client id and secret are read from ``GOOGLE_CLIENT_ID`` and ``GOOGLE_CLIENT_SECRET``
 at the moment a token request is built, by name, kept in no attribute and never logged.
-Offline, core's testing plugin pins ``EnvKeyAuth.key`` to its placeholder, so the refresh
-token a replayed exchange carries is the placeholder (conventions §10).
+Offline, core's testing plugin pins ``RenewingBearerAuth.credential`` to its placeholder,
+so every credential a replayed exchange carries is the placeholder (conventions §10).
 
 ``SCOPE_SETS`` names the two grants ``xippios-google-mail-auth --scopes`` asks for:
 ``read``, ``gmail.readonly``, and ``write``, ``gmail.modify``, which serves every read
@@ -35,28 +33,27 @@ grant's scopes; ``_client.classify`` turns its refusal into the re-consent ``Aut
 naming the scopes this auth was granted.
 """
 
-import os
 import threading
 import time
-from collections.abc import Callable, Generator, Iterable
+from collections.abc import Callable, Iterable
 
 import httpx
 import pydantic
 from pydantic import BaseModel, ConfigDict, SecretStr
 from xippios.core import (
     AuthError,
+    BearerToken,
     ConfigError,
-    UpstreamError,
+    RenewingBearerAuth,
     ValidationError,
-    error_from_response,
+    XippiosError,
+    request_description,
 )
-from xippios.core.client.auth import EnvKeyAuth
 
 __all__ = [
     "CLIENT_ID_ENV",
     "CLIENT_SECRET_ENV",
     "CONSENT_COMMAND",
-    "EXPIRY_MARGIN",
     "SCOPE_SETS",
     "TOKEN_URL",
     "RefreshTokenAuth",
@@ -73,8 +70,6 @@ CLIENT_SECRET_ENV = "GOOGLE_CLIENT_SECRET"  # pragma: allowlist secret
 """The variable holding that client's secret, sent with every token request (C2)."""
 CONSENT_COMMAND = "xippios-google-mail-auth"
 """The consent tool that issues a refresh token (``_consent``), named in the messages."""
-EXPIRY_MARGIN = 60.0
-"""Seconds before an access token's ``expires_in`` runs out that the auth refreshes it."""
 SCOPE_PREFIX = "https://www.googleapis.com/auth/"
 """The prefix of Google's scope URLs, left out where a message names a scope."""
 SCOPE_SETS: dict[str, tuple[str, ...]] = {
@@ -107,23 +102,6 @@ def scope_set_for(accepted: Iterable[str]) -> str | None:
     return None
 
 
-def _credential(name: str, source: str | None) -> str:
-    """The value of the client variable ``name``; an empty one counts as unset.
-
-    Raises:
-        ConfigError: The variable is unset or empty; the message names both client
-            variables, never a value.
-    """
-    value = os.environ.get(name, "").strip()
-    if value:
-        return value
-    raise ConfigError(
-        f"{name} is not set; export the operator's Desktop-app OAuth client as "
-        f"{CLIENT_ID_ENV} and {CLIENT_SECRET_ENV}",
-        source=source,
-    )
-
-
 class _TokenAnswer(BaseModel):
     """The token endpoint's HTTP 200, the fields kept (``oauth2-web-server.md``; F19).
 
@@ -151,28 +129,25 @@ def _oauth_error(response: httpx.Response) -> str | None:
     return code if isinstance(code, str) else None
 
 
-class RefreshTokenAuth(EnvKeyAuth):
+class RefreshTokenAuth(RenewingBearerAuth):
     """Exchange an account's refresh token for an access token, send it, renew it in time.
 
-    The ``httpx.Auth`` of one account's client (ADR-0025, D-b; queue row 252). Its key
-    is the refresh token, read from ``env_var`` (``GOOGLE_<NAME>_REFRESH_TOKEN``) on the
-    first request, or given as ``key``. When it holds no access token, or the one it
-    holds expires within ``EXPIRY_MARGIN`` (60 s) of its ``expires_in``, its
-    ``auth_flow`` sends the refresh request (``token_request``) ahead of the request it
-    signs and keeps the answer (``keep``): the access token, when it lapses (monotonic)
-    and the granted ``scope`` set, under a lock, in memory only. Every request goes out
-    with ``Authorization: Bearer <access token>``. A request answered with HTTP 401
-    refreshes once more and goes out again, once; the answer to that one goes back to
-    the client, whose ``classify`` maps a second 401 to ``AuthError``. Two requests that
-    start together before the first refresh has answered may each refresh.
+    The ``httpx.Auth`` of one account's client (ADR-0025, D-b), on core's renewing-bearer
+    base. Its credential is the refresh token, read from ``env_var``
+    (``GOOGLE_<NAME>_REFRESH_TOKEN``) at each refresh, or given as ``key``. Core's flow
+    sends the refresh request (``token_request``) when no access token is held, or the one
+    held expires within ``margin`` (60 s) of its ``expires_in``, ahead of the request it
+    signs, and keeps the access token and when it lapses; ``read_token`` keeps the granted
+    ``scope`` set too, under a lock, in memory only. Every request goes out with
+    ``Authorization: Bearer <access token>``. A request answered with HTTP 401 refreshes
+    once more and goes out again, once; the answer to that one goes back to the client,
+    whose ``classify`` maps a second 401 to ``AuthError``.
 
     The exchange runs inside the request's ``httpx`` auth flow, below core's limiter,
     hooks, cache and ``classify``: a refresh is not paced, not seen by the quota policy
-    and not retried, and an error this flow raises (``AuthError``, ``ConfigError``,
-    ``ValidationError`` or core's mapping of another answer) ends the call. The token
-    endpoint costs no Gmail quota. ``requires_response_body`` is set, so httpx reads every
-    answer of the flow in full before the flow sees it, the token answer among them: no
-    endpoint this package calls streams.
+    and not retried, and an error the flow raises (``AuthError``, ``ConfigError``,
+    ``ValidationError`` or core's error for another answer) ends the call. The token
+    endpoint costs no Gmail quota.
 
     Args:
         env_var: The variable holding the refresh token, e.g.
@@ -185,6 +160,7 @@ class RefreshTokenAuth(EnvKeyAuth):
 
     Attributes:
         account: As given.
+        env_var: As given.
 
     Raises:
         ConfigError: From a request: ``env_var``, ``GOOGLE_CLIENT_ID`` or
@@ -196,10 +172,9 @@ class RefreshTokenAuth(EnvKeyAuth):
         ValidationError: From a request: the token endpoint's HTTP 200 is not the
             documented answer; nothing of it is quoted.
         XippiosError: From a request, for any other answer of the token endpoint: core's
-            mapping (``RateLimitError`` for a 429, ``UpstreamError`` for a 5xx).
+            error for its status (``RateLimitError`` for a 429, ``UpstreamError`` for a
+            5xx), which quotes nothing of the answer.
     """
-
-    requires_response_body = True
 
     def __init__(
         self,
@@ -210,12 +185,12 @@ class RefreshTokenAuth(EnvKeyAuth):
         source: str | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        super().__init__(env_var, key=key, source=source)
+        self.env_var = env_var
+        super().__init__(
+            source=source, clock=clock, credentials=None if key is None else {env_var: key}
+        )
         self.account = account
-        self._clock = clock
         self._state = threading.Lock()
-        self._access_token: SecretStr | None = None
-        self._lapses_at = 0.0
         self._granted: frozenset[str] | None = None
         self._refresh_token_expires_in: int | None = None
 
@@ -237,125 +212,92 @@ class RefreshTokenAuth(EnvKeyAuth):
         with self._state:
             return self._refresh_token_expires_in
 
-    def reset(self) -> None:
-        """Forget the access token, so that the next request refreshes it."""
-        with self._state:
-            self._access_token = None
-            self._lapses_at = 0.0
-
-    def _current(self) -> SecretStr | None:
-        """The access token while it is outside the margin of its expiry, else ``None``."""
-        with self._state:
-            if self._access_token is not None and self._clock() < self._lapses_at:
-                return self._access_token
-            return None
+    def credential_help(self, name: str) -> str:
+        """What the ``ConfigError`` of an unset ``name`` says after ``"<name> is not set; "``."""
+        if name in (CLIENT_ID_ENV, CLIENT_SECRET_ENV):
+            return (
+                f"export the operator's Desktop-app OAuth client as {CLIENT_ID_ENV} and "
+                f"{CLIENT_SECRET_ENV}"
+            )
+        return "export it or pass the key explicitly"
 
     def token_form(self) -> dict[str, str]:
         """The refresh request's form fields, read at this moment; never log or keep it.
 
         ``client_id`` and ``client_secret`` from ``GOOGLE_CLIENT_ID`` and
         ``GOOGLE_CLIENT_SECRET``, ``grant_type`` ``refresh_token`` and ``refresh_token``,
-        the key, in the order the guide lists them. The fixture recorder sends it for
-        ``oauth2_token``; the flow sends it through ``token_request``.
+        the refresh token, in the order the guide lists them, each read through
+        ``credential``. The fixture recorder sends it for ``oauth2_token``; the flow sends
+        it through ``token_request``.
 
         Raises:
             ConfigError: A client variable or the refresh token's variable is unset.
         """
         return {
-            "client_id": _credential(CLIENT_ID_ENV, self.source),
-            "client_secret": _credential(CLIENT_SECRET_ENV, self.source),
+            "client_id": self.credential(CLIENT_ID_ENV),
+            "client_secret": self.credential(CLIENT_SECRET_ENV),
             "grant_type": "refresh_token",
-            "refresh_token": self.key(),
+            "refresh_token": self.credential(self.env_var),
         }
 
     def token_request(self, request: httpx.Request | None = None) -> httpx.Request:
-        """The refresh request, ahead of ``request``, whose ``User-Agent`` it sends."""
-        headers = {"Accept": "application/json"}
-        if request is not None and "user-agent" in request.headers:
-            headers["User-Agent"] = request.headers["user-agent"]
-        return httpx.Request("POST", TOKEN_URL, data=self.token_form(), headers=headers)
+        """The refresh request, sent ahead of ``request`` with its ``User-Agent`` by core."""
+        return httpx.Request(
+            "POST", TOKEN_URL, data=self.token_form(), headers={"Accept": "application/json"}
+        )
 
-    def keep(self, response: httpx.Response) -> None:
-        """Keep the access token, when it lapses and the granted scopes from a refresh answer.
+    def read_token(self, response: httpx.Response) -> BearerToken:
+        """The access token and its lifetime from a refresh answer; the granted scopes kept.
 
         Args:
-            response: The token endpoint's answer, read in full.
+            response: The token endpoint's HTTP 200, read in full.
 
         Raises:
-            AuthError: HTTP 400 ``invalid_grant``: the refresh token was revoked,
-                expired (unused for six months, or a seven-day grant of an app in
-                Testing status, ``oauth2.md``) or never valid; the message names the account, the
-                consent tool's re-run and the variable to set.
-            ConfigError: HTTP 401 ``invalid_client``: the token endpoint refused the
-                OAuth client; the message names ``GOOGLE_CLIENT_ID`` and
-                ``GOOGLE_CLIENT_SECRET``.
-            ValidationError: An HTTP 200 that is not the documented answer.
-            XippiosError: Any other answer, by core's mapping (``error_from_response``),
-                or ``UpstreamError`` for another status below 400.
+            ValidationError: An HTTP 200 that is not the documented answer; nothing of it
+                is quoted.
+        """
+        try:
+            answer = _TokenAnswer.model_validate_json(response.content)
+        except pydantic.ValidationError:
+            # Raised without pydantic's text, which would quote the token it read.
+            raise ValidationError(
+                f"{request_description(response)} answered HTTP 200, but not the documented "
+                "token answer (access_token, expires_in, scope, token_type); the answer is not "
+                "shown",
+                raw="",
+                source=self.source,
+            ) from None
+        with self._state:
+            self._granted = frozenset(answer.scope.split())
+            self._refresh_token_expires_in = answer.refresh_token_expires_in
+        return BearerToken(answer.access_token, answer.expires_in)
+
+    def token_refused(self, response: httpx.Response) -> XippiosError:
+        """The error for a token answer other than HTTP 200, read in full.
+
+        Returns:
+            ``AuthError`` for HTTP 400 ``invalid_grant``: the refresh token was revoked,
+            expired (unused for six months, or a seven-day grant of an app in Testing
+            status, ``oauth2.md``) or never valid; the message names the account, the
+            consent tool's re-run and the variable to set. ``ConfigError`` for HTTP 401
+            ``invalid_client``: the token endpoint refused the OAuth client; the message
+            names ``GOOGLE_CLIENT_ID`` and ``GOOGLE_CLIENT_SECRET``. Core's error for its
+            status otherwise, which quotes nothing of the answer.
         """
         status = response.status_code
-        where = f"{response.request.method} {response.request.url.path}"
-        if status == 200:
-            try:
-                answer = _TokenAnswer.model_validate_json(response.content)
-            except pydantic.ValidationError:
-                # Raised without pydantic's text, which would quote the token it read.
-                raise ValidationError(
-                    f"{where} answered HTTP 200, but not the documented token answer "
-                    "(access_token, expires_in, scope, token_type); the answer is not shown",
-                    raw="",
-                    source=self.source,
-                ) from None
-            lapses_at = self._clock() + max(0.0, answer.expires_in - EXPIRY_MARGIN)
-            with self._state:
-                self._access_token = answer.access_token
-                self._lapses_at = lapses_at
-                self._granted = frozenset(answer.scope.split())
-                self._refresh_token_expires_in = answer.refresh_token_expires_in
-            return
         code = _oauth_error(response)
         if status == 400 and code == "invalid_grant":
-            raise AuthError(
+            return AuthError(
                 f"account {self.account}: refresh token revoked or expired; re-run "
                 f"{CONSENT_COMMAND} --account {self.account} and set {self.env_var}",
                 status=status,
                 source=self.source,
             )
         if status == 401 and code == "invalid_client":
-            raise ConfigError(
+            return ConfigError(
                 f"the token endpoint refused the OAuth client (HTTP 401 invalid_client from "
-                f"{where}); check that {CLIENT_ID_ENV} and {CLIENT_SECRET_ENV} hold the "
-                "operator's Desktop-app client id and secret",
+                f"{request_description(response)}); check that {CLIENT_ID_ENV} and "
+                f"{CLIENT_SECRET_ENV} hold the operator's Desktop-app client id and secret",
                 source=self.source,
             )
-        error = error_from_response(response, source=self.source)
-        if error is None:
-            error = UpstreamError(
-                f"{where} answered HTTP {status}, not the documented 200; nothing of it is shown",
-                status=status,
-                body="",
-                source=self.source,
-            )
-        raise error
-
-    def apply(self, request: httpx.Request) -> None:
-        """Attach the access token held as ``Authorization: Bearer``; never the refresh token."""
-        token = self._current()
-        if token is None:  # pragma: no cover - auth_flow refreshes or raises first
-            raise AuthError(
-                f"account {self.account}: no access token to send", status=401, source=self.source
-            )
-        request.headers["Authorization"] = f"Bearer {token.get_secret_value()}"
-
-    def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
-        """The httpx hook: refresh without a current token, sign, refresh once more on 401."""
-        if self._current() is None:
-            answer = yield self.token_request(request)
-            self.keep(answer)
-        self.apply(request)
-        response = yield request
-        if response.status_code == 401:
-            answer = yield self.token_request(request)
-            self.keep(answer)
-            self.apply(request)
-            yield request
+        return super().token_refused(response)
