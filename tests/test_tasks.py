@@ -46,7 +46,7 @@ from xippios.google.mail.models import Profile
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 TENANT_LIST = "list_accounts"
-"""The package's tenant list (``_tenants.list_task``, queue row 281): no ``account``."""
+"""The package's tenant list (core's ``list_task``): no ``account``."""
 ACCOUNT_TASKS: dict[str, Callable[..., object]] = {
     name: getattr(tasks, name) for name in tasks.__all__ if name != TENANT_LIST
 }
@@ -99,6 +99,8 @@ def test_list_accounts_lists_the_declared_names_only(
     assert tool_name(SOURCE, tasks.list_accounts) == "google_mail_list_accounts"
     assert list(inspect.signature(tasks.list_accounts).parameters) == []
     assert tasks.list_accounts().data == [DEMO]
+    assert TENANTS.source == SOURCE, "the registry names the source"
+    assert TENANTS.var("work", "REFRESH_TOKEN") == "GOOGLE_WORK_REFRESH_TOKEN", "the prefix"
     monkeypatch.setenv(TENANTS.list_var, "work,private")
     monkeypatch.setenv(TENANTS.var("work", "REFRESH_TOKEN"), "hidden-work-token")
     result = tasks.list_accounts()
@@ -199,7 +201,7 @@ def granted(scopes: str) -> RefreshTokenAuth:
         "scope": scopes,
         "token_type": "Bearer",
     }
-    auth.keep(httpx.Response(200, json=answer, request=request))
+    auth.read_token(httpx.Response(200, json=answer, request=request))
     return auth
 
 
