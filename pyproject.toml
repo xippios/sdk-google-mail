@@ -53,6 +53,12 @@ dev = [
   "markdownify==1.2.3",
 ]
 
+# The trial of xippios-core 0.4.0 before its tag (sdk-google-mail#19): core's main at the
+# commit that merged its last step. Conventions §15, item 1, lets no git pin into main; the
+# adoption replaces it with the tag's bound.
+[tool.uv.sources]
+xippios-core = { git = "https://github.com/xippios/sdk-core", rev = "96b16f841add49efe01c4fd32205cc1adcdc0ab3" }
+
 [build-system]
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"

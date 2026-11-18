@@ -1448,15 +1448,11 @@ wheels = [
 
 [[package]]
 name = "xippios-core"
-version = "0.3.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.3.2"
+source = { git = "https://github.com/xippios/sdk-core?rev=96b16f841add49efe01c4fd32205cc1adcdc0ab3#96b16f841add49efe01c4fd32205cc1adcdc0ab3" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/74/d0/ec4dc01cfc5c0beb97fea05defee907baae96fc894a7227ea6d8cb9c4c8c/xippios_core-0.3.0.tar.gz", hash = "sha256:e7a315a943daf8bdc89fdab7e43f5bafa120cf85bc623e63c71b7c1d23ab771c", size = 282204, upload-time = "2026-10-27T17:08:20.136Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/58/52/a69bc864e92bfb6eb8c856ce9157ee1d4a16ba0970b80bce7798a0b4ef6e/xippios_core-0.3.0-py3-none-any.whl", hash = "sha256:f46248b58e905f29b6307608ebba7b9f1b2ca82287a99bbf3d7b5e8897a0a603", size = 120748, upload-time = "2026-10-27T17:08:18.326Z" },
 ]
 
 [package.optional-dependencies]
@@ -1507,10 +1503,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "xippios-core", specifier = "~=0.3.0" },
-    { name = "xippios-core", extras = ["http"], marker = "extra == 'http'", specifier = "~=0.3.0" },
-    { name = "xippios-core", extras = ["mcp"], marker = "extra == 'mcp'", specifier = "~=0.3.0" },
-    { name = "xippios-core", extras = ["testing"], marker = "extra == 'testing'", specifier = "~=0.3.0" },
+    { name = "xippios-core", git = "https://github.com/xippios/sdk-core?rev=96b16f841add49efe01c4fd32205cc1adcdc0ab3" },
+    { name = "xippios-core", extras = ["http"], marker = "extra == 'http'", git = "https://github.com/xippios/sdk-core?rev=96b16f841add49efe01c4fd32205cc1adcdc0ab3" },
+    { name = "xippios-core", extras = ["mcp"], marker = "extra == 'mcp'", git = "https://github.com/xippios/sdk-core?rev=96b16f841add49efe01c4fd32205cc1adcdc0ab3" },
+    { name = "xippios-core", extras = ["testing"], marker = "extra == 'testing'", git = "https://github.com/xippios/sdk-core?rev=96b16f841add49efe01c4fd32205cc1adcdc0ab3" },
 ]
 provides-extras = ["mcp", "http", "testing"]
 
