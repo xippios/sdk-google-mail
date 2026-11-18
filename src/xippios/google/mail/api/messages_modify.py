@@ -13,7 +13,6 @@ accounts, are not sent. The answer is ``schemas.Message``. Five quota units
 from urllib.parse import quote
 
 from xippios.core import AsyncClient, parse
-from xippios.core.client import decode_json
 
 from xippios.google.mail._client import SOURCE
 from xippios.google.mail.models import Message, ModifyMessageRequest
@@ -48,5 +47,5 @@ async def messages_modify(
         add_label_ids=add_label_ids or [], remove_label_ids=remove_label_ids or []
     )
     body = {name: value for name, value in request.dump_upstream().items() if value}
-    response = await client.request("POST", f"messages/{quote(id, safe='')}/modify", json=body)
-    return parse(Message, decode_json(response, source=SOURCE), source=SOURCE, endpoint=ENDPOINT)
+    answer = await client.post_json(f"messages/{quote(id, safe='')}/modify", json=body)
+    return parse(Message, answer, source=SOURCE, endpoint=ENDPOINT)

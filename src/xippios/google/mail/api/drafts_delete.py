@@ -21,7 +21,8 @@ async def drafts_delete(client: AsyncClient, id: str) -> None:
     """gmail.users.drafts.delete: delete a draft permanently; 10 units; no answer body.
 
     An error answer raises through the client (``classify``, then core's mapping: a 404
-    is ``NotFoundError``); a success's body, empty, is not read. A ``DELETE`` is not
+    is ``NotFoundError``); for a success's body, empty, ``delete_json`` returns ``None``. A
+    ``DELETE`` is not
     retried after a 5xx or a transport failure (ADR-0011).
 
     Args:
@@ -29,4 +30,4 @@ async def drafts_delete(client: AsyncClient, id: str) -> None:
         id: ``id``, the draft's id, e.g. ``"r-1234567890123456789"``, a ``Draft``'s
             ``id``; sent as one path segment.
     """
-    await client.request("DELETE", f"drafts/{quote(id, safe='')}")
+    await client.delete_json(f"drafts/{quote(id, safe='')}")
