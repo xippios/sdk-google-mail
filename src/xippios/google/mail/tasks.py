@@ -5,7 +5,7 @@
 ``account: str`` is the first, required parameter of every task: the name of a declared
 account (``demo``, ``work``), whose client (``_client.client_for``) the task hands to the
 endpoint wrappers. No task spans accounts. The one exception is ``list_accounts``, the
-package's tenant list (``_tenants.list_task``, queue row 281): no argument, the declared
+package's tenant list (core's ``list_task``): no argument, the declared
 accounts' names only, so an agent can form valid calls.
 
 ``meta.endpoint`` is the operation's id in the discovery document
@@ -26,12 +26,11 @@ message.
 from collections.abc import Mapping
 from typing import Any
 
-from xippios.core import InvalidRequestError, Result, ResultCap, ResultMeta, sync
+from xippios.core import InvalidRequestError, Result, ResultCap, ResultMeta, list_task, sync
 
 from xippios.google.mail import api
 from xippios.google.mail._client import SOURCE, TENANTS, client_for
 from xippios.google.mail._decode import decode_message, header_value
-from xippios.google.mail._tenants import list_task
 from xippios.google.mail.api.get_profile import ENDPOINT as GET_PROFILE
 from xippios.google.mail.api.labels_list import ENDPOINT as LABELS_LIST
 from xippios.google.mail.api.messages_get import ENDPOINT as MESSAGES_GET
@@ -109,8 +108,8 @@ alone. Only names come back, never an address, a token or another value; an empt
 means that no account is declared where the server runs.
 """
 
-list_accounts = list_task(TENANTS, name="list_accounts", doc=LIST_ACCOUNTS_DOC, source=SOURCE)
-"""The declared accounts' names (queue row 281); ``meta.tenant`` is ``None``."""
+list_accounts = list_task(TENANTS, name="list_accounts", doc=LIST_ACCOUNTS_DOC)
+"""The declared accounts' names; ``meta.source`` the registry's, ``meta.tenant`` ``None``."""
 
 
 async def get_profile_async(account: str) -> Result[Profile]:
