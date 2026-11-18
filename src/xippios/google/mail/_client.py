@@ -7,8 +7,8 @@ every task takes ``account``, the name of an account declared in the environment
 (``RefreshTokenAuth``, ``_auth.py``), its own token bucket, its own quota policy and no
 response cache.
 
-The registry is the package's own ``Tenants`` (``_tenants.py``, copied from sdk-cashctrl,
-queue row 281), ``TENANTS`` below; the environment is the contract (conventions §7):
+The registry is core's ``Tenants``, ``TENANTS`` below; the environment is the contract
+(conventions §7):
 
 - ``GOOGLE_ACCOUNTS``: comma-separated names matching ``^[a-z0-9_]+$``, e.g. ``work,private``;
 - per name, ``GOOGLE_<NAME>_REFRESH_TOKEN``, the name upper-cased
@@ -19,10 +19,12 @@ queue row 281), ``TENANTS`` below; the environment is the contract (conventions 
   ``GOOGLE_DEMO_REFRESH_TOKEN`` is set. Fixtures, live tests and the fixture recorder use
   ``demo`` and nothing else.
 
-The registry's first argument is the variable prefix every Google source shares,
-``google``, not this package's slug, so its messages say "google" (ADR-0025, D-b).
-``TENANTS.names()`` lists the declared accounts, ``TENANTS.require(account)`` refuses an
-undeclared one with ``InvalidRequestError`` (the caller's mistake), and a malformed list
+The registry names this package's slug, ``google-mail``, so its errors name the source,
+and its variables keep the prefix every Google source shares, ``GOOGLE`` (``var_prefix``;
+ADR-0025, amendment 2026-11-18, (b)); ``account`` is the task parameter that names an
+account, declared once on the registry (``param``). ``TENANTS.names()`` lists the
+declared accounts, ``TENANTS.require(account)`` refuses an undeclared one with
+``InvalidRequestError`` (the caller's mistake), and a malformed list
 is a ``ConfigError`` naming the variable, never a value (the operator's). The client is
 kept under a digest of the refresh token, the one long-lived credential, so a refresh,
 which changes only the access token in memory, rebuilds no client (ADR-0025, D-b).
@@ -31,6 +33,7 @@ Nothing here spans accounts: ``TENANTS.names()`` returns names only, never value
 
 import dataclasses
 import functools
+import os
 import re
 from typing import Any
 
@@ -39,9 +42,11 @@ from xippios.core import (
     AsyncClient,
     AuthError,
     ClientConfig,
+    ConfigError,
     QuotaPolicy,
     RateLimit,
     RateLimitError,
+    Tenants,
     XippiosError,
 )
 
@@ -52,7 +57,6 @@ from xippios.google.mail._auth import (
     scope_set_for,
     short_scope,
 )
-from xippios.google.mail._tenants import Tenants
 from xippios.google.mail._version import __version__
 
 __all__ = [
@@ -67,6 +71,7 @@ __all__ = [
     "SOURCE",
     "TENANTS",
     "account_config",
+    "check_account",
     "classify",
     "client_for",
     "config",
@@ -102,12 +107,34 @@ DEMO = "demo"
 """The reserved account, declared by ``GOOGLE_DEMO_REFRESH_TOKEN`` alone and never listed."""
 
 TENANTS = Tenants(
-    "google",
+    SOURCE,
+    var_prefix="GOOGLE",
     list_var="GOOGLE_ACCOUNTS",
+    param="account",
     fields=("REFRESH_TOKEN",),
     reserved=(DEMO,),
 )
 """Gmail's accounts, declared in the environment (ADR-0025, D-b)."""
+
+
+def check_account(account: str) -> None:
+    """Stop a server bound to ``account`` at startup when its refresh token is unset.
+
+    ``serve_tenants`` calls it after ``TENANTS.require``, so ``--account <name>`` fails
+    before anything is served; the token itself is read on the first request.
+
+    Raises:
+        ConfigError: ``GOOGLE_<NAME>_REFRESH_TOKEN`` is unset or blank; the message names
+            the variable and the consent command that prints the token, never a value.
+    """
+    variable = TENANTS.var(account, "REFRESH_TOKEN")
+    if not os.environ.get(variable, "").strip():
+        raise ConfigError(
+            f"{variable} is not set; export the refresh token "
+            f"{CONSENT_COMMAND} --account {account} printed",
+            source=SOURCE,
+        )
+
 
 _SCOPE_PARAM = re.compile(r'(?:^|[\s,])scope="([^"]*)"')
 """The ``scope`` parameter of a ``WWW-Authenticate: Bearer`` challenge, space-separated."""

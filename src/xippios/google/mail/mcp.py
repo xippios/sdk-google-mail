@@ -1,20 +1,19 @@
 """MCP server for Gmail.
 
 Every task in ``tasks.__all__`` is a read-only tool, but those ``tasks.BULK_TASKS``
-names, which core skips: the server is passed ``tasks.__all__`` whole (ADR-0019). No
-logic lives here (ADR-0001). Entry point: ``xippios-google-mail-mcp-read``, the read
-server; ``--account <name>`` binds it to one account (``_cli``, ``_account_lock``), and
-``--http`` serves it on a loopback ``--host`` only, unless ``--allow-remote`` is passed
-(ADR-0025, D-a). The write tools are ``mcp_write.py``'s, on a server of their own.
+names (``tool_functions``, ADR-0019). No logic lives here (ADR-0001). Entry point:
+``xippios-google-mail-mcp-read``, the read server; ``--account <name>`` binds it to one
+account (core's ``serve_tenants`` and ``TenantLock``), and core holds it to loopback
+(``loopback_only``): ``--http`` on a loopback ``--host`` only, unless ``--allow-remote``
+is passed (ADR-0025, D-a). The write tools are ``mcp_write.py``'s, on a server of their
+own.
 """
 
-from mcp.server.mcpserver import MCPServer
-from xippios.core.mcp import build_server
+from xippios.core import TenantLock, bind_tasks, tenant_instructions
+from xippios.core.mcp import ToolSet, build_server, serve_tenants, tool_functions
 
 from xippios.google.mail import tasks
-from xippios.google.mail._account_lock import AccountLock, bind_tasks, instructions
-from xippios.google.mail._cli import serve
-from xippios.google.mail._client import SOURCE
+from xippios.google.mail._client import SOURCE, TENANTS, check_account
 from xippios.google.mail._version import __version__
 
 INSTRUCTIONS = (
@@ -32,23 +31,21 @@ BOUND_INSTRUCTIONS = (
 """The text of a server ``--account`` binds; the lock's sentence names the account."""
 
 
-def build(lock: AccountLock | None = None) -> MCPServer:
-    """The read-only server, bound to one account when ``lock`` is given."""
-    return build_server(
+def build(lock: TenantLock | None = None) -> ToolSet:
+    """The read server's tool set, bound to one account when ``lock`` is given."""
+    return ToolSet(
         SOURCE,
-        bind_tasks([getattr(tasks, name) for name in tasks.__all__], lock),
-        version=__version__,
-        instructions=instructions(INSTRUCTIONS, lock, bound=BOUND_INSTRUCTIONS),
+        bind_tasks(tool_functions(tasks), lock),
         caps=getattr(tasks, "MCP_CAPS", None),
+        instructions=tenant_instructions(INSTRUCTIONS, lock, bound=BOUND_INSTRUCTIONS),
+        version=__version__,
+        loopback_only=True,
     )
 
 
-server = build()
+server = build_server(build())
 
 
 def run() -> None:
     """Run the server: stdio by default, ``--http`` for streamable HTTP, ``--account`` binds it."""
-    # Command-line options of the source's own reach core's parser through its hooks
-    # (ADR-0014): _cli.serve calls main(server, add_options=add_account, apply_options=<checks
-    # the loopback rule and returns the server, bound to the account --account names>).
-    serve(server, build)
+    serve_tenants(server, build, TENANTS, check=check_account)
