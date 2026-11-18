@@ -16,7 +16,6 @@ The method's media upload (``/upload/gmail/v1/...``) is not used: the message go
 from typing import Any
 
 from xippios.core import AsyncClient, parse
-from xippios.core.client import decode_json
 
 from xippios.google.mail._client import SOURCE
 from xippios.google.mail.models import Message
@@ -43,5 +42,5 @@ async def messages_send(client: AsyncClient, *, raw: str, thread_id: str | None 
     body: dict[str, Any] = {"raw": raw}
     if thread_id is not None:
         body["threadId"] = thread_id
-    response = await client.request("POST", "messages/send", json=body)
-    return parse(Message, decode_json(response, source=SOURCE), source=SOURCE, endpoint=ENDPOINT)
+    answer = await client.post_json("messages/send", json=body)
+    return parse(Message, answer, source=SOURCE, endpoint=ENDPOINT)

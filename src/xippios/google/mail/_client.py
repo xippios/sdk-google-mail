@@ -48,6 +48,7 @@ from xippios.core import (
     RateLimitError,
     Tenants,
     XippiosError,
+    request_description,
 )
 
 from xippios.google.mail._auth import (
@@ -271,7 +272,7 @@ def classify(
     if status not in (401, 403):
         return None
     reason = _reason(response)
-    where = f"{response.request.method} {response.request.url.path}"
+    where = request_description(response)
     named = f"account {auth.account}" if auth is not None else "the account"
     if status == 403 and reason in QUOTA_REASONS:
         return RateLimitError(

@@ -231,7 +231,7 @@ async def search_messages_async(
         raise InvalidRequestError(
             f"max_results is {max_results}; search_messages reads 1 to "
             f"{SEARCH_MAX_RESULTS} messages, 5 + 20 quota units each, so narrow q or page "
-            "through the ids with list_messages",
+            "through the ids with list_messages (over MCP, the tool google_mail_list_messages)",
             source=SOURCE,
         )
     client = client_for(account)
