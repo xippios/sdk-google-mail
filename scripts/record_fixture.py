@@ -172,7 +172,15 @@ from urllib.parse import parse_qsl, quote, quote_plus, unquote_plus, urlencode
 
 import httpx
 from xippios.core import AsyncClient, RetryPolicy, XippiosError, sync
-from xippios.core.testing import REDACTED, Fixture, Scrub, fixture_from_response, fixture_path
+from xippios.core.testing import (
+    REDACTED,
+    Fixture,
+    Scrub,
+    fixture_from_response,
+    fixture_path,
+    fixture_text,
+    write_fixture,
+)
 
 from xippios.google.mail import api, tasks, tasks_write
 from xippios.google.mail._auth import (
@@ -907,19 +915,6 @@ def check(text: str, fixture: Fixture, secrets: Sequence[str]) -> list[str]:
     return leaks + message_leaks
 
 
-_CUT_MARKS = ("truncated", "original_bytes", "original_count", "sha256")
-"""The response fields that mark a cut body; core's writer leaves them out of one not cut."""
-
-
-def to_json(fixture: Fixture) -> str:
-    """The fixture as text, laid out as core's ``write_fixture`` lays it out (no cut here)."""
-    data = fixture.model_dump(mode="json")
-    if not fixture.response.truncated:
-        for name in _CUT_MARKS:
-            data["response"].pop(name, None)
-    return json.dumps(data, indent=2, sort_keys=True) + "\n"
-
-
 class _Bearer(httpx.Auth):
     """``Authorization: Bearer <token>`` and nothing else: ``--garbage-bearer``'s auth."""
 
@@ -1051,28 +1046,26 @@ def record_task(args: argparse.Namespace) -> int:
     if not responses:
         print(f"nothing written: {args.operation} sent no Gmail request")  # noqa: T201
         return 1
-    files: list[tuple[Path, str, Fixture]] = []
+    files: list[tuple[Path, Fixture]] = []
+    scrub = Scrub(secrets=secret_values(), response_secrets=answer_tokens)
     for index, response in enumerate(responses, start=1):
         case = args.case if index == 1 else f"{args.case}_{index}"
         path = fixture_path(FIXTURES, args.operation, case)
         secrets = [*secret_values(), *answer_tokens(response)]
         try:
-            fixture = rewrite(
-                fixture_from_response(response, scrub=Scrub(secrets=secrets)), secrets
-            )
+            fixture = rewrite(fixture_from_response(response, scrub=scrub), secrets)
+            text = fixture_text(fixture)
         except ValueError as refused:  # names what and where, never a value
             print(f"nothing written: {path.relative_to(ROOT)}: {refused}")  # noqa: T201
             return 1
-        text = to_json(fixture)
         leaks = check(text, fixture, secrets)
         if leaks:
             where = path.relative_to(ROOT)
             print(f"nothing written: {where} would contain " + "; ".join(leaks))  # noqa: T201
             return 1
-        files.append((path, text, fixture))
-    for path, text, fixture in files:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        files.append((path, fixture))
+    for path, fixture in files:
+        write_fixture(fixture, path)
         line = f"{fixture.response.status} {fixture.request.method} {fixture.request.url}"
         print(f"{line} -> {path.relative_to(ROOT)}")  # noqa: T201
     return 0
@@ -1087,20 +1080,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     path = fixture_path(FIXTURES, args.operation, args.case)
     response, units = exchange(args)
     secrets = [*secret_values(), *answer_tokens(response)]
+    scrub = Scrub(secrets=secret_values(), response_secrets=answer_tokens)
     try:
-        fixture = rewrite(fixture_from_response(response, scrub=Scrub(secrets=secrets)), secrets)
+        fixture = rewrite(fixture_from_response(response, scrub=scrub), secrets)
+        text = fixture_text(fixture)
     except ValueError as refused:  # names what and where, never a value
         print(f"not written {path.relative_to(ROOT)}: {refused}")  # noqa: T201
         return 1
-    text = to_json(fixture)
     leaks = check(text, fixture, secrets)
     spent = f" ({units} quota unit{'s' if units != 1 else ''})" if units else ""
     if leaks:
         print(f"not written {path.relative_to(ROOT)}: it would contain " + "; ".join(leaks))  # noqa: T201
         print(f"sent: {fixture.request.method} {fixture.response.status}{spent}")  # noqa: T201
         return 1
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    write_fixture(fixture, path)
     print(f"{fixture.response.status} {fixture.request.method} {fixture.request.url}{spent}")  # noqa: T201
     return 0
 
