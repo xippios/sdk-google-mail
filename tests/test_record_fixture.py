@@ -26,6 +26,7 @@ from xippios.core.testing import (
     Scrub,
     fixture_from_response,
     fixture_text,
+    sent_bodies,
     sent_urls,
 )
 
@@ -710,7 +711,7 @@ def test_a_composing_recording_sends_to_demo_alone_and_keeps_no_raw(
     argv = ["send_message", "ok", "subject=xippios-live send", "body=hello", "confirm=true"]
     assert recorder.main(argv) == 0
     assert profile.call_count == 1, "the profile is read, outside the recording"
-    raw = json.loads(sent.calls.last.request.content)["raw"]
+    raw = sent_bodies(sent)[-1]["raw"]
     message = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)).decode()
     address = json.loads(own["response"]["body"])["emailAddress"]
     assert f"To: {address}\r\n" in message
