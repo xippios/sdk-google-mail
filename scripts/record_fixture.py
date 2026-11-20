@@ -97,7 +97,7 @@ fixture in memory with ``Scrub(secrets=[...])`` naming demo's refresh token, the
 secret and the client id, read by name from the environment here and never printed, and
 every token the answer carries (conventions §10): credentials scrubbed, those values made
 ``REDACTED`` where they appear as given, and a plain verify that refuses the exchange when
-one is still there as given. Then the recorder's own step (``rewrite``, ADR-0024 decision
+one is still there as given. Then the recorder's own step (``rewrite``, sdk-core ADR-0042 decision
 4) runs on the ``Fixture`` core returns:
 
 - the same values in their percent-encoded and JSON-escaped forms (a refresh token's

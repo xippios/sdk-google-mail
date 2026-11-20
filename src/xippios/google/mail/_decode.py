@@ -1,4 +1,6 @@
-"""The decoded view of a message: its MIME tree read by role (ADR-0025, "The decoded view").
+"""The decoded view of a message: its MIME tree read by role.
+
+sdk-core ADR-0025, "The decoded view".
 
 ``decode_message`` turns a ``Message`` fetched with ``format=full`` into a
 ``DecodedMessage``. Decoding the tree is parsing a value, the one override conventions
@@ -53,7 +55,7 @@ HEADERS = (
     "In-Reply-To",
     "References",
 )
-"""The headers a decoded view keeps (ADR-0025), compared without regard to case."""
+"""The headers a decoded view keeps (sdk-core ADR-0025), compared without regard to case."""
 _KEPT = frozenset(name.lower() for name in HEADERS)
 
 

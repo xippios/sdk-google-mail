@@ -24,7 +24,7 @@ async def messages_trash(client: AsyncClient, id: str) -> Message:
     """gmail.users.messages.trash: move a message to the trash; 20 units.
 
     Sends no body. A ``POST`` is never retried after a 5xx or a transport failure
-    (ADR-0011).
+    (sdk-core ADR-0011).
 
     Args:
         client: The account's client, ``_client.client_for(account)``.

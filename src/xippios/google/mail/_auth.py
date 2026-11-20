@@ -1,9 +1,9 @@
 """The renewing bearer: an account's refresh token exchanged for an access token in memory.
 
-ADR-0025, D-b. Every account has a long-lived refresh token, ``GOOGLE_<NAME>_REFRESH_TOKEN``,
-issued to the operator's Desktop-app OAuth client when the account consented
-(``xippios-google-mail-auth``). ``RefreshTokenAuth`` is the ``httpx.Auth`` of the account's
-client, a subclass of core's ``RenewingBearerAuth``: its credential
+sdk-core ADR-0025, D-b. Every account has a long-lived refresh token,
+``GOOGLE_<NAME>_REFRESH_TOKEN``, issued to the operator's Desktop-app OAuth client when the
+account consented (``xippios-google-mail-auth``). ``RefreshTokenAuth`` is the ``httpx.Auth``
+of the account's client, a subclass of core's ``RenewingBearerAuth``: its credential
 (``RenewingBearerAuth.credential``) is the refresh token, and core's flow exchanges it at
 Google's token endpoint for a short-lived access token, which it sends as
 ``Authorization: Bearer``. The exchange is the refresh request of
@@ -28,7 +28,7 @@ so every credential a replayed exchange carries is the placeholder (conventions 
 
 ``SCOPE_SETS`` names the two grants ``xippios-google-mail-auth --scopes`` asks for:
 ``read``, ``gmail.readonly``, and ``write``, ``gmail.modify``, which serves every read
-method too (``docs/upstream/pages/auth-scopes.md``; ADR-0025, D-c). Upstream enforces a
+method too (``docs/upstream/pages/auth-scopes.md``; sdk-core ADR-0025, D-c). Upstream enforces a
 grant's scopes; ``_client.classify`` turns its refusal into the re-consent ``AuthError``,
 naming the scopes this auth was granted.
 """
@@ -76,7 +76,9 @@ SCOPE_SETS: dict[str, tuple[str, ...]] = {
     "read": ("https://www.googleapis.com/auth/gmail.readonly",),
     "write": ("https://www.googleapis.com/auth/gmail.modify",),
 }
-"""The grants ``xippios-google-mail-auth --scopes`` asks for, narrowest first (ADR-0025, D-c).
+"""The grants ``xippios-google-mail-auth --scopes`` asks for, narrowest first.
+
+sdk-core ADR-0025, D-c.
 
 ``gmail.modify`` serves every read method too (``docs/upstream/pages/auth-scopes.md``):
 "Read, compose, and send emails from your Gmail account".
@@ -132,7 +134,7 @@ def _oauth_error(response: httpx.Response) -> str | None:
 class RefreshTokenAuth(RenewingBearerAuth):
     """Exchange an account's refresh token for an access token, send it, renew it in time.
 
-    The ``httpx.Auth`` of one account's client (ADR-0025, D-b), on core's renewing-bearer
+    The ``httpx.Auth`` of one account's client (sdk-core ADR-0025, D-b), on core's renewing-bearer
     base. Its credential is the refresh token, read from ``env_var``
     (``GOOGLE_<NAME>_REFRESH_TOKEN``) at each refresh, or given as ``key``. Core's flow
     sends the refresh request (``token_request``) when no access token is held, or the one

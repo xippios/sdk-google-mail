@@ -30,7 +30,7 @@ async def messages_send(client: AsyncClient, *, raw: str, thread_id: str | None 
     """gmail.users.messages.send: send a message to its To, Cc and Bcc; 100 units.
 
     Sends ``{"raw": raw, "threadId": thread_id}``, ``threadId`` left out when ``None``.
-    A ``POST`` is never retried after a 5xx or a transport failure (ADR-0011): the
+    A ``POST`` is never retried after a 5xx or a transport failure (sdk-core ADR-0011): the
     message may have gone.
 
     Args:

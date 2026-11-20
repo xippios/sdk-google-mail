@@ -162,7 +162,7 @@ async def test_the_write_server_serves_the_write_tasks_only() -> None:
     """Conventions §8: a write server, its tools exactly ``tasks_write.__all__``, confirm last.
 
     The account list, a reference tool, stays on the read server, and no write task is a
-    tool of the read server or a route of the HTTP router (ADR-0026: read and write
+    tool of the read server or a route of the HTTP router (sdk-core ADR-0026: read and write
     never mix).
     """
     assert len(WRITE_TASKS) == 5
@@ -396,7 +396,7 @@ def test_a_message_s_preview_shows_its_headers_and_first_lines(
 
 @pytest.mark.parametrize("name", ["create_draft", "send_message"])
 def test_meta_request_never_holds_the_body(respx_mock: respx.MockRouter, name: str) -> None:
-    """ADR-0017; conventions §4: the message's text goes to upstream inside raw alone."""
+    """sdk-core ADR-0017; conventions §4: the message's text goes to upstream inside raw alone."""
     task, args, kwargs = PREVIEWS[name]
     result = task(*args, **kwargs)
     assert "body" not in result.meta.request

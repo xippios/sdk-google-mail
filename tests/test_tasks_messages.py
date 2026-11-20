@@ -130,7 +130,7 @@ def test_list_messages_returns_upstream_s_page_of_ids(replay_fixture: ReplayFixt
     ]
     assert result.data.next_page_token == expected["nextPageToken"]
     assert result.data.result_size_estimate == expected["resultSizeEstimate"]
-    assert result.meta.total is None, "an estimate is no count (ADR-0012)"
+    assert result.meta.total is None, "an estimate is no count (sdk-core ADR-0034)"
     assert_meta(result, "gmail.users.messages.list", {"maxResults": 2})
     assert sent_query(route) == recorded_query(recorded("list_messages", "ok"))
     assert sent_query(route) == {"maxResults": "2"}
@@ -431,7 +431,9 @@ def test_mcp_caps_name_get_message_and_get_thread_alone() -> None:
 def test_a_long_message_comes_back_as_a_preview_and_the_note(
     replay_fixture: ReplayFixture,
 ) -> None:
-    """ADR-0025: over the cap a long text or html is a preview plus the note (ADR-0016).
+    """sdk-core ADR-0025: over the cap a long text or html is a preview and the note.
+
+    sdk-core ADR-0038 gives the note.
 
     The recorded message is short, so its text is made 40 times as long in memory; the
     cap and its note are the tool's own, from ``MCP_CAPS``.

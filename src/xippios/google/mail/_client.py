@@ -1,7 +1,7 @@
 """The account registry for Gmail: one configured ``AsyncClient`` per account (conventions §6).
 
 Gmail serves every mailbox under a grant of its own, an account's refresh token issued to
-the operator's Desktop-app OAuth client (ADR-0025). So there is no single client here:
+the operator's Desktop-app OAuth client (sdk-core ADR-0025). So there is no single client here:
 every task takes ``account``, the name of an account declared in the environment, and
 ``client_for(account)`` returns that account's own client, with its own renewing bearer
 (``RefreshTokenAuth``, ``_auth.py``), its own token bucket, its own quota policy and no
@@ -21,13 +21,13 @@ The registry is core's ``Tenants``, ``TENANTS`` below; the environment is the co
 
 The registry names this package's slug, ``google-mail``, so its errors name the source,
 and its variables keep the prefix every Google source shares, ``GOOGLE`` (``var_prefix``;
-ADR-0025, amendment 2026-11-18, (b)); ``account`` is the task parameter that names an
+sdk-core ADR-0025, amendment 2026-11-18, (b)); ``account`` is the task parameter that names an
 account, declared once on the registry (``param``). ``TENANTS.names()`` lists the
 declared accounts, ``TENANTS.require(account)`` refuses an undeclared one with
 ``InvalidRequestError`` (the caller's mistake), and a malformed list
 is a ``ConfigError`` naming the variable, never a value (the operator's). The client is
 kept under a digest of the refresh token, the one long-lived credential, so a refresh,
-which changes only the access token in memory, rebuilds no client (ADR-0025, D-b).
+which changes only the access token in memory, rebuilds no client (sdk-core ADR-0025, D-b).
 Nothing here spans accounts: ``TENANTS.names()`` returns names only, never values.
 """
 
@@ -128,7 +128,7 @@ TENANTS = Tenants(
     fields=("REFRESH_TOKEN",),
     reserved=(DEMO,),
 )
-"""Gmail's accounts, declared in the environment (ADR-0025, D-b)."""
+"""Gmail's accounts, declared in the environment (sdk-core ADR-0025, D-b)."""
 
 
 def check_account(account: str) -> None:
@@ -185,7 +185,7 @@ def quota_spent(response: httpx.Response) -> float | None:
 
     Upstream answers a spent per-minute limit with HTTP 403 and the reason
     ``rateLimitExceeded`` or ``userRateLimitExceeded``, no quota header and no
-    ``Retry-After`` (``handle-errors.md``; F8), so the policy reads that answer (ADR-0015);
+    ``Retry-After`` (``handle-errors.md``; F8), so the policy reads that answer (sdk-core ADR-0037);
     ``None`` for every other response.
     """
     if response.status_code == 403 and _reason(response) in QUOTA_REASONS:
@@ -251,7 +251,7 @@ def classify(
       ``AuthError`` naming the scopes the account was granted and the scope set to
       re-consent with, ``...: account <name> was granted gmail.readonly; this tool needs
       gmail.modify; re-run xippios-google-mail-auth --account <name> --scopes write``
-      (ADR-0025, D-c). The shape is the one recorded on 2026-10-29 (F19,
+      (sdk-core ADR-0025, D-c). The shape is the one recorded on 2026-10-29 (F19,
       ``tests/fixtures/messages_modify/insufficient_permissions.json``), not the 401
       ``authError`` the error page folds it into: ``status`` ``PERMISSION_DENIED`` and a
       ``WWW-Authenticate: Bearer error="insufficient_scope", scope="..."`` header listing
@@ -343,8 +343,8 @@ def account_config(auth: RefreshTokenAuth) -> ClientConfig:
     """``config`` for the account ``auth`` signs for: its ``classify`` and its quota policy.
 
     ``classify`` is bound to ``auth``, so the scope refusal names that account's granted
-    scopes. A ``QuotaPolicy`` of its own is installed (ADR-0010, decisions 1 and 4;
-    ADR-0015): no quota header is read (upstream sends none, F8), ``spent`` reads the 403
+    scopes. A ``QuotaPolicy`` of its own is installed (sdk-core ADR-0033, decisions 1 and 4;
+    sdk-core ADR-0037): no quota header is read (upstream sends none, F8), ``spent`` reads the 403
     of a spent per-minute quota (``quota_spent``) and ``window`` is ``QUOTA_WINDOW``, so
     an account request in that minute waits out what is left of it when that is within
     the policy's ``pause_cap`` (30 s), and is otherwise refused with ``RateLimitError``

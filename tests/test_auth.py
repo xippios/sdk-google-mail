@@ -1,4 +1,4 @@
-"""RefreshTokenAuth (ADR-0025, D-b): one refresh, its reuse, the 401 retry, the refusals, no disk.
+"""RefreshTokenAuth (sdk-core ADR-0025, D-b): the refresh, the 401 retry, the refusals, no disk.
 
 Every exchange is a recorded one: the refresh (``oauth2_token/ok``), the token endpoint's
 ``invalid_grant`` and ``invalid_client``, the profile and its 401 to a garbage bearer

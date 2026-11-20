@@ -321,7 +321,7 @@ def test_a_spent_minute_holds_the_account_s_next_call_back(
     """The account's QuotaPolicy: after a 403 rate limit nothing is sent for 60 s.
 
     The wait is over the policy's 30 s ``pause_cap``, so the next call is refused at once
-    without sending (ADR-0015).
+    without sending (sdk-core ADR-0037).
     """
     replay_fixture("oauth2_token", "ok")
     sample = documented(403, "userRateLimitExceeded", "User Rate Limit Exceeded")

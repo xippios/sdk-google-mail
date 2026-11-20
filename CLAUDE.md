@@ -14,7 +14,7 @@ follows, sdk-core's conventions among them, are listed under
 | API base URL | `https://gmail.googleapis.com/gmail/v1/users/me` |
 | Documentation | Gmail's discovery document, https://gmail.googleapis.com/$discovery/rest?version=v1, which the REST reference https://developers.google.com/workspace/gmail/api/reference/rest names (`SPEC_URL` of `scripts/refresh_upstream.py`), kept as `docs/upstream/discovery.json` with its keys sorted; beside it, as Markdown under `docs/upstream/pages/`, the usage limits, the errors, the scopes, the Gmail Help article on search operators and Google's OAuth 2.0 overview and guides for desktop apps and web server applications (`/refresh-upstream`) |
 | Credentials | an OAuth 2.0 bearer renewed from a refresh token per account: the operator's Desktop-app client `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, the account list `GOOGLE_ACCOUNTS` and one `GOOGLE_<NAME>_REFRESH_TOKEN` per account (`demo` declared by `GOOGLE_DEMO_REFRESH_TOKEN` alone, never listed), from the environment, the registry `TENANTS` in `_client.py`, core's `Tenants`; `RefreshTokenAuth` (`_auth.py`), a subclass of core's `RenewingBearerAuth`, exchanges the refresh token at `POST https://oauth2.googleapis.com/token`, keeps the access token, its expiry and the granted scopes in memory and sends the access token as a bearer, renewing it within 60 s of its expiry and once more on a 401; nothing is written to disk; a refresh token comes from `xippios-google-mail-auth` (`_consent.py`), for the scope set `read` (`gmail.readonly`) or `write` (`gmail.modify`); the nightly `live.yml` passes the client pair and demo's token as org secrets |
-| Rate limit | 60 requests per minute, burst 10, a self-imposed pace per account, enforced client-side in `_client.py` (`RATE_LIMIT`, one token bucket per account client); upstream documents a quota in units, 6,000 per minute per user per project and 1,200,000 per minute per project, with the units per method on the quota page, `docs/upstream/pages/quota.md` (`getProfile` 1; `messages.get` 20, 60 with `format=full`, its default; `threads.get` 40, 120 with `format=full`, its default), so 60 full `threads.get` in a minute (7,200 units) would exceed the per-user quota; the backstop is a `QuotaPolicy` per account (`account_config`, sdk-core ADR-0010, sdk-core ADR-0015; queue rows 143 and 299) that reads upstream's 403 `rateLimitExceeded` and `userRateLimitExceeded` (Gmail documents no quota header and no `Retry-After`) and holds the account's requests back for 60 s, which `classify` maps to `RateLimitError` with `retry_after` 60 s, `dailyLimitExceeded` with 3,600 s |
+| Rate limit | 60 requests per minute, burst 10, a self-imposed pace per account, enforced client-side in `_client.py` (`RATE_LIMIT`, one token bucket per account client); upstream documents a quota in units, 6,000 per minute per user per project and 1,200,000 per minute per project, with the units per method on the quota page, `docs/upstream/pages/quota.md` (`getProfile` 1; `messages.get` 20, 60 with `format=full`, its default; `threads.get` 40, 120 with `format=full`, its default), so 60 full `threads.get` in a minute (7,200 units) would exceed the per-user quota; the backstop is a `QuotaPolicy` per account (`account_config`, sdk-core ADR-0033, sdk-core ADR-0037; queue rows 143 and 299) that reads upstream's 403 `rateLimitExceeded` and `userRateLimitExceeded` (Gmail documents no quota header and no `Retry-After`) and holds the account's requests back for 60 s, which `classify` maps to `RateLimitError` with `retry_after` 60 s, `dailyLimitExceeded` with 3,600 s |
 | Write tools | yes: `create_draft`, `delete_draft`, `send_message`, `modify_message` and `trash_message` in `tasks_write.py`, served by the write server's entry point `xippios-google-mail-mcp-write` (`mcp_write.py`, registered with `read_only=False`, so core keeps `--http` on loopback without `--allow-remote`), never by the read server or the HTTP router; each takes `account` first and `confirm: bool = False` last, and without `confirm=True` sends nothing to the write endpoint and returns a preview; they need the account's `write` grant (`gmail.modify`) |
 
 The snapshot listed in `docs/upstream/FETCHED.md` is the reference for names, parameters and
@@ -161,7 +161,7 @@ direnv exec ~/github/sdk uv run scripts/record_fixture.py send_message ok \
 ```
 
 `uv run pytest` is offline: core's plugin refuses the network and skips the rate limiter's
-waits in every test not marked `live` (conventions §10, sdk-core ADR-0013). A test that
+waits in every test not marked `live` (conventions §10, sdk-core ADR-0035). A test that
 asserts a limiter wait or a quota pause is marked `rate_limited`, one that must reach the
 network `network`.
 
@@ -214,7 +214,7 @@ live seven days: a refresh answered `invalid_grant` means a new consent, by hand
 - Never write a key, a token or another credential into a file or a commit.
 - Never put logic in `mcp.py` or `http.py`, and never add a route or a tool by hand: the
   adapters register `tasks.__all__` (sdk-core ADR-0001).
-- Never rename or re-map an upstream concept to another source's (sdk-core ADR-0003).
+- Never rename or re-map an upstream concept to another source's (sdk-core ADR-0028).
 - Never return a documented personal identifier in a task's projection, echo one in
   `meta.request`, or commit one in a fixture (sdk-core ADR-0017).
 - Never edit `docs/upstream/` by hand: `/refresh-upstream` fetches it, and the pull request
@@ -294,14 +294,14 @@ attachment: `attachments` lists its `part_id`, `filename`, `mime_type`, `size` a
 `attachment_id`, never its content, and the walk does not descend into it. Over the result cap a
 message, no list, comes back as the result's first 64 KB and a note of the tool's own
 (`MCP_CAPS["get_message"]`): its text or html is cut, `include_html=False` gives the text
-alone, and no `start` resumes it (sdk-core ADR-0025, sdk-core ADR-0016). `get_thread`
+alone, and no `start` resumes it (sdk-core ADR-0025, sdk-core ADR-0038). `get_thread`
 returns the views of a thread's messages, text only, from `start`, at most `limit`, and
 records `start` in `meta.request`, so core's cut note ends `; resume with start=<start +
 shown>` (conventions §8). `search_messages` reads at most 50 messages (`SEARCH_MAX_RESULTS`,
 in the task for every caller, sdk-core ADR-0001): a list and one `format=metadata` call per
 id, 5 + 20 units each, 1,005 for 50. No task reports `meta.total`: Gmail's
 `resultSizeEstimate` is an estimate, kept as a data field of `list_messages` (sdk-core
-ADR-0012).
+ADR-0034).
 
 ### The write tools and the write safety rule
 
@@ -340,7 +340,7 @@ Every task takes `account` first; `list_accounts` names the declared accounts, n
 (core's `TenantLock`, through `serve_tenants`). `--http` serves the read server on a loopback
 `--host` only unless `--allow-remote` is passed (sdk-core ADR-0025 D-a), since it reaches
 every declared mailbox and carries no authentication, and core's `main` holds the write
-server to the same rule (sdk-core ADR-0014, decision 9). Upstream enforces a grant's
+server to the same rule (sdk-core ADR-0036, decision 9). Upstream enforces a grant's
 scopes: a call the grant does not cover is answered HTTP 403 `insufficientPermissions` with
 `WWW-Authenticate: Bearer error="insufficient_scope", scope="..."` (recorded 2026-10-29;
 Gmail's error page says 401 `authError`), which `classify` maps to the `AuthError`

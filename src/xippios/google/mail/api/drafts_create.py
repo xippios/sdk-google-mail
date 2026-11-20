@@ -32,7 +32,7 @@ async def drafts_create(client: AsyncClient, *, raw: str, thread_id: str | None 
 
     Sends ``{"message": {"raw": raw, "threadId": thread_id}}``, ``threadId`` left out
     when ``None``. A ``POST`` is never retried after a 5xx or a transport failure
-    (ADR-0011).
+    (sdk-core ADR-0011).
 
     Args:
         client: The account's client, ``_client.client_for(account)``.

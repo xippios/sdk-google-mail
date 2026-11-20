@@ -34,7 +34,7 @@ async def messages_modify(
 
     Sends ``{"addLabelIds": [...], "removeLabelIds": [...]}``, a list left out when
     ``None`` or empty. A ``POST`` is never retried after a 5xx or a transport failure
-    (ADR-0011).
+    (sdk-core ADR-0011).
 
     Args:
         client: The account's client, ``_client.client_for(account)``.

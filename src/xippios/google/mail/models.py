@@ -9,16 +9,16 @@ MCP and over HTTP alike. Types follow the schemas of ``docs/upstream/discovery.j
 ``historyId``, stays the string it is; ``internalDate``, a timestamp upstream sends as
 a string of epoch milliseconds, is parsed to an aware UTC ``datetime``
 (``EpochMillis``), since conventions §3 types dates and times. A documented value set is
-a ``StrEnum`` written here (``LabelType``), since the package packages no list. A field the schema has and an answer may leave out is ``None`` by default,
-a list ``[]``.
+a ``StrEnum`` written here (``LabelType``), since the package packages no list. A field
+the schema has and an answer may leave out is ``None`` by default, a list ``[]``.
 
 Three kinds of model live here. The models of the endpoint wrappers are faithful
-(ADR-0003): ``Label``, ``ListLabelsResponse``, ``MessageRef``, ``ListMessagesResponse``,
+(sdk-core ADR-0028): ``Label``, ``ListLabelsResponse``, ``MessageRef``, ``ListMessagesResponse``,
 ``MessagePartHeader``, ``MessagePartBody``, ``MessagePart``, ``Message`` and ``Thread``,
 the MIME tree of a message whole under ``Message.payload``; ``Draft``, the answer of
 ``drafts.create``; and ``ModifyMessageRequest``, the body ``messages.modify`` takes. The
 models the read tasks return beside them are projections: ``DecodedMessage`` with its
-``Attachment`` items, the decoded view of ADR-0025 that ``_decode.decode_message`` builds
+``Attachment`` items, the decoded view of sdk-core ADR-0025 that ``_decode.decode_message`` builds
 from a ``Message`` by the parts' MIME roles (conventions §3), and ``SearchRow``, a
 message's three metadata headers beside its ids and snippet. The write tasks
 (``tasks_write``) return upstream's answer when confirmed and, without ``confirm``, a
@@ -483,7 +483,7 @@ class Attachment(UpstreamModel):
 
 
 class DecodedMessage(UpstreamModel):
-    """A message's decoded view: its headers, text and attachments, by MIME role (ADR-0025).
+    """A message's decoded view: headers, text and attachments, by MIME role (sdk-core ADR-0025).
 
     The fields ``Message`` has are copied from it; ``headers``, ``text``, ``html`` and
     ``attachments`` come from its ``payload``, the MIME tree, decoded by

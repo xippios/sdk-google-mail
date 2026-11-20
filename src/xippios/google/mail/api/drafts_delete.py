@@ -23,7 +23,7 @@ async def drafts_delete(client: AsyncClient, id: str) -> None:
     An error answer raises through the client (``classify``, then core's mapping: a 404
     is ``NotFoundError``); for a success's body, empty, ``delete_json`` returns ``None``. A
     ``DELETE`` is not
-    retried after a 5xx or a transport failure (ADR-0011).
+    retried after a 5xx or a transport failure (sdk-core ADR-0011).
 
     Args:
         client: The account's client, ``_client.client_for(account)``.

@@ -10,15 +10,15 @@ accounts' names only, so an agent can form valid calls.
 
 ``meta.endpoint`` is the operation's id in the discovery document
 (``gmail.users.getProfile``), ``meta.tenant`` the account the data came from, by name
-(ADR-0014, decision 5), and ``meta.request`` holds ``account`` plus the parameters sent,
+(sdk-core ADR-0036, decision 5), and ``meta.request`` holds ``account`` plus the parameters sent,
 under upstream's names (``labelIds``, ``maxResults``, ``format``), and a parameter the
 task applies itself under its own name (``include_html``, ``start``, ``limit``); never a
 body. Gmail publishes no release time or identifier for a mailbox, so ``published_at``
 and ``vintage`` stay empty, and it reports no count of what a query matches, only
-``resultSizeEstimate``, an estimate, so ``meta.total`` stays ``None`` (ADR-0012).
+``resultSizeEstimate``, an estimate, so ``meta.total`` stays ``None`` (sdk-core ADR-0034).
 
 The message tasks return projections (conventions §3): ``get_message`` and
-``get_thread`` the decoded view of ADR-0025 (``_decode.decode_message``), whose faithful
+``get_thread`` the decoded view of sdk-core ADR-0025 (``_decode.decode_message``), whose faithful
 MIME tree stays on the wrapper's ``Message``, and ``search_messages`` a ``SearchRow`` per
 message.
 """
@@ -54,14 +54,15 @@ __all__ = [
     "search_messages",
 ]
 
-# A task named here is Python-only: no tool, no route; the adapters skip it (ADR-0019 decision 4).
+# A task named here is Python-only: no tool, no route; the adapters skip it
+# (sdk-core ADR-0040, decision 4).
 BULK_TASKS: frozenset[str] = frozenset()
 
 MCP_CAPS: Mapping[str, ResultCap] = {
     # A message is no list: over the default 64 KB core returns the result's first 64 KB
     # as a preview after "result is <n> bytes, over the cap of 65536; " and this note,
-    # which says what was cut and what the agent can do; no start resumes it (ADR-0016;
-    # ADR-0025, "Over the cap a long text or html comes back as a preview plus the note").
+    # which says what was cut and what the agent can do; no start resumes it (sdk-core ADR-0038;
+    # sdk-core ADR-0025, "Over the cap a long text or html comes back as a preview plus the note").
     "get_message": ResultCap(
         note=(
             "the preview is the first 64 KB of the result, so a long message's text or html "
@@ -71,7 +72,7 @@ MCP_CAPS: Mapping[str, ResultCap] = {
     ),
     # A thread's messages can pass the default 64 KB; the note names the two parameters
     # that page through it, and core's cut ends "; resume with start=<start + shown>"
-    # from meta.request's start (conventions §8, ADR-0016 and its amendment).
+    # from meta.request's start (conventions §8, sdk-core ADR-0038, decision 3).
     "get_thread": ResultCap(
         note=(
             "page through the thread with start and limit; a message too long for the cap "
@@ -79,12 +80,12 @@ MCP_CAPS: Mapping[str, ResultCap] = {
         )
     ),
 }
-"""Per-tool result caps, keyed by the task function's name (conventions §8, ADR-0016)."""
+"""Per-tool result caps, keyed by the task function's name (conventions §8, sdk-core ADR-0038)."""
 
 SEARCH_MAX_RESULTS = 50
 """The most messages ``search_messages`` reads: 5 + 20 x 50 = 1,005 quota units."""
 # The bound is the task's, so it holds for every caller, Python, MCP and HTTP alike
-# (ADR-0001: no logic in an adapter).
+# (sdk-core ADR-0001: no logic in an adapter).
 SEARCH_HEADERS = ["From", "Subject", "Date"]
 """The ``metadataHeaders`` ``search_messages`` asks for, the three a ``SearchRow`` shows."""
 

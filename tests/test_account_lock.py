@@ -5,7 +5,7 @@ and core's ``tests/test_tenant_lock.py`` and ``tests/mcp/test_cli.py`` hold the 
 the lock and the command. What stays here is this package's own: its tasks bound, the
 account list on a bound server, ``--account`` with ``check_account`` on both entry
 points, their instructions, the read server held to loopback (``loopback_only``;
-ADR-0025, D-a) and the write server held there by core's rule. Every tool call goes
+sdk-core ADR-0025, D-a) and the write server held there by core's rule. Every tool call goes
 through ``xippios.core.testing.mcp_call_text``, an in-process ``mcp.Client``, so core's
 argument check runs as it does for a real client.
 """
@@ -178,7 +178,7 @@ async def test_both_entry_points_bind_to_the_account(
         assert set(tool.input_schema.get("properties", {})) == expected, name
 
 
-# The loopback rule (ADR-0025, D-a) ---------------------------------------------------
+# The loopback rule (sdk-core ADR-0025, D-a) ---------------------------------------------------
 
 
 @pytest.mark.parametrize(
