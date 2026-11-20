@@ -100,12 +100,15 @@ ENV_VARS: tuple[EnvVar, ...] = (
 An ``EnvVar`` names a variable and reads none."""
 # Paced under the limit upstream documents; CLAUDE.md gives both (sdk-core ADR-0033 decision 1).
 # Upstream documents its limit in quota units, 6,000 a minute per user per project
-# (docs/upstream/pages/quota.md), not in requests: at 60 requests a minute an account spends
-# at most 6,000 units on the calls of 100 units or fewer, messages.send the dearest, and only
-# a full threads.get, 120 units, could pass it; the QuotaPolicy below is the backstop.
+# (docs/upstream/pages/quota.md), not in requests. The sustained pace, 60 a minute, keeps
+# the calls of 100 units or fewer within it, 60 messages.send spending 6,000. It can pass
+# the quota twice: the burst lets 70 messages.send through in a minute from idle, 7,000
+# units, and 51 full threads.get, what get_thread sends, spend 6,120. The QuotaPolicy below
+# backs both.
 RATE_LIMIT = RateLimit(per_minute=60, burst=10)
-"""Per account and self-imposed, 60 a minute with bursts of 10: ``client_for`` gives each
-account a client, and each client a token bucket of its own."""
+"""Per account, 60 a minute with bursts of 10, under upstream's per-user quota in units for
+every call but the two above: ``client_for`` gives each account a client, and each client a
+token bucket of its own, 10 requests at once, then one a second."""
 
 QUOTA_REASONS = frozenset({"rateLimitExceeded", "userRateLimitExceeded"})
 """The reasons of upstream's HTTP 403 to a spent per-minute limit (``handle-errors.md``)."""
