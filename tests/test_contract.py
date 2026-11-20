@@ -257,11 +257,12 @@ def test_a_token_answer_the_package_does_not_know_is_quoted_nowhere(
     """Not ``invalid_grant`` or ``invalid_client``: the status, the request and the reason
     phrase, and nothing of the answer, which a token endpoint may write from the
     credentials it was sent; the message and the body quoted it before."""
-    secret = "Missing required parameter: refresh_token"
+    described = "Missing required parameter: refresh_token"
     respx_mock.post(TOKEN_URL).mock(
-        return_value=httpx.Response(status, json={"error": "x", "error_description": secret})
+        return_value=httpx.Response(status, json={"error": "x", "error_description": described})
     )
     with pytest.raises(error) as info:
         tasks.get_profile(DEMO)
     assert str(info.value) == message
+    assert described not in str(info.value)
     assert not getattr(info.value, "body", None)
