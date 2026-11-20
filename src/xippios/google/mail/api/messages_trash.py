@@ -10,7 +10,6 @@ the message to Trash.". The method takes no request body. The answer is
 from urllib.parse import quote
 
 from xippios.core import AsyncClient, parse
-from xippios.core.client import decode_json
 
 from xippios.google.mail._client import SOURCE
 from xippios.google.mail.models import Message
@@ -25,12 +24,12 @@ async def messages_trash(client: AsyncClient, id: str) -> Message:
     """gmail.users.messages.trash: move a message to the trash; 20 units.
 
     Sends no body. A ``POST`` is never retried after a 5xx or a transport failure
-    (ADR-0011).
+    (sdk-core ADR-0011).
 
     Args:
         client: The account's client, ``_client.client_for(account)``.
         id: ``id``, the message's id, e.g. ``"19a0b0c0d0e0f001"``; sent as one path
             segment.
     """
-    response = await client.request("POST", f"messages/{quote(id, safe='')}/trash")
-    return parse(Message, decode_json(response, source=SOURCE), source=SOURCE, endpoint=ENDPOINT)
+    answer = await client.post_json(f"messages/{quote(id, safe='')}/trash")
+    return parse(Message, answer, source=SOURCE, endpoint=ENDPOINT)

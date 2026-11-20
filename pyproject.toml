@@ -18,13 +18,13 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "xippios-core~=0.3.0",
+  "xippios-core~=0.4.0",
 ]
 
 [project.optional-dependencies]
-mcp = ["xippios-core[mcp]~=0.3.0"]
-http = ["xippios-core[http]~=0.3.0"]
-testing = ["xippios-core[testing]~=0.3.0"]
+mcp = ["xippios-core[mcp]~=0.4.0"]
+http = ["xippios-core[http]~=0.4.0"]
+testing = ["xippios-core[testing]~=0.4.0"]
 
 [project.scripts]
 xippios-google-mail-mcp-read = "xippios.google.mail.mcp:run"
@@ -107,6 +107,7 @@ addopts = "-ra --strict-markers --import-mode=importlib"
 testpaths = ["tests"]
 # record_property, in a live test say, warns under xunit2 when a run writes --junitxml.
 junit_family = "xunit1"
-# Set to core's placeholder in every test not marked live (conventions §10): demo's refresh
-# token and the OAuth client pair, which RefreshTokenAuth reads when it refreshes.
+# Core's plugin sets them to the placeholder key in every test not marked live
+# (sdk-core ADR-0035), the reserved account's credential first: demo's refresh token and
+# the OAuth client pair, each a variable RefreshTokenAuth reads when it refreshes.
 xippios_placeholder_key_envs = ["GOOGLE_DEMO_REFRESH_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]

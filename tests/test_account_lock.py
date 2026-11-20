@@ -1,79 +1,37 @@
-"""The --account lock and the loopback rule: ``_account_lock``, wired up by ``_cli``.
+"""The package's wiring of core's --account lock and loopback rule.
 
-From sdk-cashctrl's ``tests/test_org_lock.py`` at ``6db155b`` (queue row 281), with
-``account`` for ``org``: no middleware, but a wrapper that binds ``account`` on every tool
-when the server is built, so no tool takes it. Every tool call goes through
-``xippios.core.testing.mcp_call_text``, an in-process ``mcp.Client``, so core's argument
-check runs as it does for a real client. Its write-server tests as well: both entry
-points fail fast on an undeclared account and bind to a declared one, and the write
-server is held to loopback by core's rule. Added: the read server's loopback rule
-(ADR-0025, D-a) and the unset refresh token at startup.
+Core's ``TenantLock``, ``bind_tasks`` and ``serve_tenants`` bind a server to one account,
+and core's ``tests/test_tenant_lock.py`` and ``tests/mcp/test_cli.py`` hold the tests of
+the lock and the command. What stays here is this package's own: its tasks bound, the
+account list on a bound server, ``--account`` with ``check_account`` on both entry
+points, their instructions, the read server held to loopback (``loopback_only``;
+sdk-core ADR-0025, D-a) and the write server held there by core's rule. Every tool call goes
+through ``xippios.core.testing.mcp_call_text``, an in-process ``mcp.Client``, so core's
+argument check runs as it does for a real client.
 """
 
-import dataclasses
 import inspect
 import json
-import logging
+import sys
 import typing
 from typing import Any
 
-import httpx
 import pytest
-import respx
-from mcp import Client
 from mcp.server.mcpserver import MCPServer
+from xippios.core import TenantLock, bind_tasks
 from xippios.core.mcp import build_server
 from xippios.core.testing import ReplayFixture, mcp_call, mcp_call_text
 
 from xippios.google.mail import mcp, mcp_write, tasks, tasks_write
-from xippios.google.mail._account_lock import (
-    AccountLock,
-    bind,
-    bind_tasks,
-    instructions,
-    lock_sentence,
-)
-from xippios.google.mail._cli import REMOTE_REFUSAL, serve
 from xippios.google.mail._client import DEMO, SOURCE, TENANTS
 
 pytestmark = pytest.mark.anyio
 
-TOOL = "google_mail_echo_account"
 LIST = "google_mail_list_accounts"
-REQUEST_LOGGERS = ("httpx", "httpcore")
 SENTENCE = (
     "This server is bound to account demo; every tool acts on that account and takes no account."
 )
-LOCK = AccountLock("account", DEMO)
-
-
-class EchoServers:
-    """Builds servers with one tool that records the account it was called for."""
-
-    def __init__(self, instructions: str | None = None) -> None:
-        self.calls: list[str] = []
-        self.locks: list[AccountLock | None] = []
-        self.instructions = instructions
-
-    def build(self, lock: AccountLock | None = None) -> MCPServer:
-        calls = self.calls
-
-        async def echo_account(account: str, note: str = "") -> dict[str, str]:
-            """Return the account the tool was called for.
-
-            Args:
-                account: Account name, e.g. ``demo``.
-                note: Any text, e.g. ``"hi"``.
-            """
-            calls.append(account)
-            return {"account": account, "note": note}
-
-        self.locks.append(lock)
-        return build_server(
-            SOURCE,
-            bind_tasks([echo_account, tasks.list_accounts], lock),
-            instructions=instructions(self.instructions, lock),
-        )
+LOCK = TenantLock(TENANTS, DEMO)
 
 
 @pytest.fixture
@@ -88,33 +46,26 @@ def runs(monkeypatch: pytest.MonkeyPatch) -> list[tuple[MCPServer, str, dict[str
     return served
 
 
-def locked(echo: EchoServers) -> MCPServer:
-    return echo.build(LOCK)
+def run_as(monkeypatch: pytest.MonkeyPatch, entry_point: str, *argv: str) -> None:
+    """Set the command line as the installed entry point's script runs it.
+
+    As the ``entry_point`` fixture of core's ``tests/mcp/test_cli.py`` sets it: core's
+    ``main`` names the entry point that runs in its usage line and errors, and an
+    installed script runs as ``__main__`` without a module spec, which argparse reads to
+    tell it from ``python -m``.
+    """
+    monkeypatch.setattr(sys, "argv", [f"/opt/venv/bin/{entry_point}", *argv])
+    monkeypatch.setattr(sys.modules["__main__"], "__spec__", None)
 
 
-# The lock and the wrapper ------------------------------------------------------------
-
-
-def test_a_lock_is_a_frozen_pair() -> None:
-    assert (LOCK.param, LOCK.value) == ("account", DEMO)
-    assert AccountLock(param="account", value=DEMO) == LOCK
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        LOCK.value = "other"  # type: ignore[misc]
-
-
-@pytest.mark.parametrize(
-    ("param", "value"), [("", "work"), ("an account", "work"), ("account", "")]
-)
-def test_a_lock_needs_a_parameter_name_and_a_tenant(param: str, value: str) -> None:
-    with pytest.raises(ValueError, match=r"param must be|value must name"):
-        AccountLock(param, value)
+# The package's tasks, bound ----------------------------------------------------------
 
 
 @pytest.mark.parametrize("name", [*tasks.__all__, *tasks_write.__all__])
 def test_a_bound_task_keeps_its_name_and_drops_account(name: str) -> None:
     """Same ``__name__`` (tool names, ``MCP_CAPS`` keys), no ``account`` anywhere."""
     task = getattr(tasks, name, None) or getattr(tasks_write, name)
-    bound = bind(task, LOCK)
+    bound = bind_tasks([task], LOCK)[0]
     assert bound.__name__ == task.__name__
     parameters = inspect.signature(bound).parameters
     assert "account" not in parameters
@@ -126,38 +77,10 @@ def test_a_bound_task_keeps_its_name_and_drops_account(name: str) -> None:
     assert ("Args:" in doc) == bool(parameters), "an Args: block the account line emptied goes"
 
 
-def test_the_docstring_loses_the_account_entry_and_its_continuation() -> None:
-    def task(account: str, q: str | None = None) -> None:
-        """Find things.
-
-        Args:
-            account: A declared account name,
-                e.g. ``demo``.
-            q: Gmail's search syntax, e.g. ``"from:me"``.
-
-        Returns:
-            Nothing.
-        """
-
-    assert inspect.getdoc(bind(task, LOCK)) == (
-        'Find things.\n\nArgs:\n    q: Gmail\'s search syntax, e.g. ``"from:me"``.\n\n'
-        "Returns:\n    Nothing."
-    )
-
-
-def test_a_task_without_account_is_left_as_it_is() -> None:
-    def ping() -> dict[str, bool]:
-        """Answer without an account."""
-        return {"pong": True}
-
-    assert bind(ping, LOCK) is ping
-    assert bind_tasks([ping], None) == [ping]
-
-
 async def test_a_bound_sync_facade_awaits_its_async_twin(replay_fixture: ReplayFixture) -> None:
     replay_fixture("oauth2_token", "ok")
     route = replay_fixture("get_profile", "ok")
-    result = await bind(tasks.get_profile, LOCK)()
+    result = await bind_tasks([tasks.get_profile], LOCK)[0]()
     assert (result.meta.tenant, result.meta.request) == (DEMO, {"account": DEMO})
     assert route.call_count == 1
 
@@ -165,57 +88,17 @@ async def test_a_bound_sync_facade_awaits_its_async_twin(replay_fixture: ReplayF
 # Calls on a bound server -------------------------------------------------------------
 
 
-async def test_the_bound_account_is_passed() -> None:
-    echo = EchoServers()
-    text = await mcp_call_text(locked(echo), TOOL, {"note": "hi"})
-    assert json.loads(text) == {"account": DEMO, "note": "hi"}
-    assert echo.calls == [DEMO]
-
-
-async def test_no_tool_of_a_bound_server_takes_account() -> None:
-    async with Client(locked(EchoServers())) as client:
-        tools = (await client.list_tools()).tools
-    assert [tool.name for tool in tools] == [TOOL, LIST]
-    for tool in tools:
-        assert "account" not in tool.input_schema.get("properties", {}), tool.name
-        assert "account:" not in (tool.description or ""), tool.name
-
-
-@pytest.mark.parametrize("other", [DEMO, "other", "DEMO", "", None])
-async def test_a_call_that_still_passes_account_is_answered_for_the_bound_account(
-    other: str | None,
-) -> None:
-    """As sdk-cashctrl observed under core 0.3.0: the argument check drops an unknown argument."""
-    echo = EchoServers()
-    text = await mcp_call_text(locked(echo), TOOL, {"account": other, "note": "x"})
-    assert json.loads(text) == {"account": DEMO, "note": "x"}
-    assert echo.calls == [DEMO]
-
-
-async def test_a_refused_argument_is_answered_by_core_before_the_tool_runs() -> None:
-    echo = EchoServers()
-    text = await mcp_call_text(locked(echo), TOOL, {"note": 7})
-    assert text == "error: InvalidRequestError: note: Input should be a valid string"
-    assert echo.calls == []
-
-
 async def test_the_account_list_shows_the_bound_account_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(TENANTS.list_var, "xa,xb")
-    echo = EchoServers()
-    unlocked = json.loads(await mcp_call_text(echo.build(), LIST, {}))
+    unlocked = json.loads(await mcp_call_text(build_server(mcp.build()), LIST, {}))
     assert unlocked["data"] == ["xa", "xb", DEMO]
-    only = json.loads(await mcp_call_text(locked(echo), LIST, {}))
+    only = json.loads(await mcp_call_text(build_server(mcp.build(LOCK)), LIST, {}))
     assert only["data"] == [DEMO]
     assert only["meta"]["tenant"] is None
     assert only["meta"]["endpoint"] == "list_accounts"
     assert tasks.list_accounts().data == ["xa", "xb", DEMO], "the task itself is unchanged"
-
-
-async def test_a_lock_on_an_undeclared_account_lists_nothing() -> None:
-    server = EchoServers().build(AccountLock("account", "gone"))
-    assert (await mcp_call(server, LIST, {}))["data"] == []
 
 
 async def test_the_bound_read_server_answers_for_the_bound_account_only(
@@ -225,52 +108,18 @@ async def test_the_bound_read_server_answers_for_the_bound_account_only(
     monkeypatch.setenv(TENANTS.var("xa", "REFRESH_TOKEN"), "xa-token")
     replay_fixture("oauth2_token", "ok")
     route = replay_fixture("get_profile", "ok")
-    payload = await mcp_call(mcp.build(LOCK), "google_mail_get_profile", {"account": "xa"})
+    server = build_server(mcp.build(LOCK))
+    refused = await mcp_call_text(server, "google_mail_get_profile", {"account": "xa"})
+    assert refused == (
+        "error: InvalidRequestError: account: Not an argument of this tool; it takes no arguments"
+    )
+    assert route.call_count == 0, "a refused call reaches no mailbox"
+    payload = await mcp_call(server, "google_mail_get_profile", {})
     assert (payload["meta"]["tenant"], payload["meta"]["request"]) == (DEMO, {"account": DEMO})
     assert route.call_count == 1
 
 
 # Startup and the command line --------------------------------------------------------
-
-
-async def test_serve_binds_the_server_then_hands_over_to_core(
-    runs: list[tuple[MCPServer, str, dict[str, Any]]],
-) -> None:
-    echo = EchoServers()
-    unlocked = echo.build()
-    serve(
-        unlocked, echo.build, ["--host", "127.0.0.1", "--account=demo", "--http", "--port", "9001"]
-    )
-    assert echo.locks == [None, LOCK]
-    ((server, transport, options),) = runs
-    assert server is not unlocked, "the bound server is built anew"
-    assert (transport, options) == ("streamable-http", {"host": "127.0.0.1", "port": 9001})
-    assert json.loads(await mcp_call_text(server, TOOL, {}))["account"] == DEMO
-    assert echo.calls == [DEMO]
-
-
-def test_serve_without_account_serves_unlocked(
-    runs: list[tuple[MCPServer, str, dict[str, Any]]],
-) -> None:
-    echo = EchoServers()
-    unlocked = echo.build()
-    serve(unlocked, echo.build, [])
-    assert runs == [(unlocked, "stdio", {})]
-    assert echo.locks == [None]
-
-
-def test_an_undeclared_account_fails_fast(
-    runs: list[tuple[MCPServer, str, dict[str, Any]]], capsys: pytest.CaptureFixture[str]
-) -> None:
-    echo = EchoServers()
-    with pytest.raises(SystemExit) as info:
-        serve(echo.build(), echo.build, ["--account", "nope", "--http"])
-    assert info.value.code == 2
-    err = capsys.readouterr().err
-    assert "xippios-google-mail: error: unknown tenant 'nope'; declared tenants: demo" in err
-    assert "placeholder" not in err
-    assert echo.locks == [None], "nothing is built for an undeclared account"
-    assert runs == []
 
 
 def test_a_listed_account_without_its_refresh_token_fails_at_startup(
@@ -279,34 +128,16 @@ def test_a_listed_account_without_its_refresh_token_fails_at_startup(
     runs: list[tuple[MCPServer, str, dict[str, Any]]],
 ) -> None:
     monkeypatch.setenv(TENANTS.list_var, "xa")
-    echo = EchoServers()
+    run_as(monkeypatch, "xippios-google-mail-mcp-read", "--account", "xa")
     with pytest.raises(SystemExit) as info:
-        serve(echo.build(), echo.build, ["--account", "xa"])
+        mcp.run()
     assert info.value.code == 2
     err = capsys.readouterr().err
     assert (
-        "xippios-google-mail: error: GOOGLE_XA_REFRESH_TOKEN is not set; export the refresh "
-        "token xippios-google-mail-auth --account xa printed"
+        "xippios-google-mail-mcp-read: error: GOOGLE_XA_REFRESH_TOKEN is not set; export the "
+        "refresh token xippios-google-mail-auth --account xa printed"
     ) in err
-    assert echo.locks == [None]
     assert runs == []
-
-
-def test_help_lists_account_and_core_options(capsys: pytest.CaptureFixture[str]) -> None:
-    echo = EchoServers()
-    with pytest.raises(SystemExit) as info:
-        serve(echo.build(), echo.build, ["--help"])
-    assert info.value.code == 0
-    out = capsys.readouterr().out
-    for option in ("--account", "--http", "--host", "--port", "--allow-remote"):
-        assert option in out
-
-
-def test_unknown_options_still_fail() -> None:
-    echo = EchoServers()
-    with pytest.raises(SystemExit) as info:
-        serve(echo.build(), echo.build, ["--account", "demo", "--nope"])
-    assert info.value.code == 2
 
 
 @pytest.mark.parametrize("module", [mcp, mcp_write], ids=["mcp", "mcp_write"])
@@ -347,37 +178,7 @@ async def test_both_entry_points_bind_to_the_account(
         assert set(tool.input_schema.get("properties", {})) == expected, name
 
 
-async def test_a_bound_server_names_the_account_in_its_instructions(
-    runs: list[tuple[MCPServer, str, dict[str, Any]]],
-) -> None:
-    echo = EchoServers(instructions="Gmail via xippios.")
-    serve(echo.build(), echo.build, ["--account", DEMO])
-    ((server, _, _),) = runs
-    async with Client(server) as client:
-        assert client.instructions == f"Gmail via xippios. {SENTENCE}"
-    assert lock_sentence(LOCK) == SENTENCE
-    assert instructions(None, LOCK) == SENTENCE
-
-
-def test_a_bound_server_s_text_replaces_the_unbound_one() -> None:
-    unbound = "Every tool takes account."
-    assert instructions(unbound, None, bound="Bound.") == unbound
-    assert instructions(unbound, LOCK, bound="Bound.") == f"Bound. {SENTENCE}"
-    assert instructions(unbound, LOCK) == f"{unbound} {SENTENCE}", "the copy's behaviour"
-
-
-async def test_an_unlocked_server_keeps_its_instructions(
-    runs: list[tuple[MCPServer, str, dict[str, Any]]],
-) -> None:
-    echo = EchoServers(instructions="Gmail via xippios.")
-    serve(echo.build(), echo.build, [])
-    ((server, _, _),) = runs
-    async with Client(server) as client:
-        assert client.instructions == "Gmail via xippios."
-    assert json.loads(await mcp_call_text(server, TOOL, {"account": "other"}))["account"] == "other"
-
-
-# The loopback rule (ADR-0025, D-a) ---------------------------------------------------
+# The loopback rule (sdk-core ADR-0025, D-a) ---------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -392,11 +193,15 @@ def test_the_read_server_stays_on_loopback_over_http(
     argv: list[str],
 ) -> None:
     """It reaches every declared mailbox and carries no authentication: exit 2, nothing served."""
-    monkeypatch.setattr("sys.argv", ["xippios-google-mail-mcp-read", *argv])
+    run_as(monkeypatch, "xippios-google-mail-mcp-read", *argv)
     with pytest.raises(SystemExit) as info:
         mcp.run()
     assert info.value.code == 2
-    assert f"xippios-google-mail: error: {REMOTE_REFUSAL}" in capsys.readouterr().err
+    assert (
+        "xippios-google-mail-mcp-read: error: xippios-google-mail is a read server held to "
+        "loopback and carries no authentication; serve it over --http on a loopback --host "
+        "(127.0.0.1, localhost, ::1), or pass --allow-remote"
+    ) in capsys.readouterr().err
     assert runs == []
 
 
@@ -433,17 +238,6 @@ def test_stdio_is_never_refused(
     assert [transport for _, transport, _ in runs] == ["stdio"]
 
 
-def test_the_loopback_rule_comes_before_the_account(
-    capsys: pytest.CaptureFixture[str], runs: list[tuple[MCPServer, str, dict[str, Any]]]
-) -> None:
-    echo = EchoServers()
-    with pytest.raises(SystemExit):
-        serve(echo.build(), echo.build, ["--account", "nope", "--http", "--host", "0.0.0.0"])
-    assert REMOTE_REFUSAL in capsys.readouterr().err
-    assert echo.locks == [None]
-    assert runs == []
-
-
 @pytest.mark.parametrize(
     "argv",
     [["--http", "--host", "0.0.0.0"], ["--account", DEMO, "--http", "--host", "0.0.0.0"]],
@@ -455,14 +249,13 @@ def test_the_write_server_stays_on_loopback_by_core_s_rule(
     runs: list[tuple[MCPServer, str, dict[str, Any]]],
     argv: list[str],
 ) -> None:
-    """Core's ``main`` refuses it with its own message; the read server's rule steps aside."""
+    """Core's ``main`` refuses it with its own message."""
     monkeypatch.setattr("sys.argv", ["xippios-google-mail-mcp-write", *argv])
     with pytest.raises(SystemExit) as info:
         mcp_write.run()
     assert info.value.code == 2
     err = capsys.readouterr().err
     assert "xippios-google-mail is a write server and carries no authentication" in err
-    assert REMOTE_REFUSAL not in err
     assert runs == []
     monkeypatch.setattr("sys.argv", ["xippios-google-mail-mcp-write", *argv, "--allow-remote"])
     mcp_write.run()
@@ -484,24 +277,3 @@ def test_the_write_server_s_help_lists_account_and_allow_remote(
     out = capsys.readouterr().out
     assert "--account" in out
     assert "--allow-remote" in out
-
-
-@pytest.mark.parametrize("argv", [[], ["--account", DEMO]], ids=["unlocked", "locked"])
-def test_serve_keeps_request_urls_out_of_the_log(
-    caplog: pytest.LogCaptureFixture,
-    respx_mock: respx.MockRouter,
-    runs: list[tuple[MCPServer, str, dict[str, Any]]],
-    argv: list[str],
-) -> None:
-    """Core's ``main`` quiets httpx and httpcore before it serves; the plugin restores them."""
-    echo = EchoServers()
-    server = echo.build()
-    for name in REQUEST_LOGGERS:
-        logging.getLogger(name).setLevel(logging.NOTSET)
-    serve(server, echo.build, argv)
-    assert [logging.getLogger(name).level for name in REQUEST_LOGGERS] == [logging.WARNING] * 2
-    respx_mock.get("https://gmail.googleapis.com/gmail/v1/users/me/xq-path").respond(200)
-    with caplog.at_level(logging.INFO):
-        httpx.get("https://gmail.googleapis.com/gmail/v1/users/me/xq-path")
-    assert "xq-path" not in caplog.text
-    assert not [record for record in caplog.records if record.name in REQUEST_LOGGERS]

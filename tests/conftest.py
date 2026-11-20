@@ -1,9 +1,6 @@
-# Queue row 281: the demo-only strip is a copy of sdk-cashctrl's tests/conftest.py, part of
-# the kit that returns to xippios-core in 0.4.0 (ADR-0023, decision 4; ADR-0025, D-d).
 # This file is the template's, edited by hand for the account model (class human).
 import contextlib
 import os
-import re
 import sys
 import threading
 from collections.abc import Callable, Iterator
@@ -11,36 +8,24 @@ from contextlib import AbstractContextManager
 from typing import Any
 
 import pytest
+from xippios.core.testing import keep_reserved_tenants
 
 from xippios.google.mail._client import DEMO, TENANTS
 
-# Core's plugin keeps the default run offline and free of real keys (ADR-0013), runs anyio
-# tests on asyncio and serves the family check in tests/test_family.py; the variables it
-# sets to the placeholder are named under xippios_placeholder_key_envs in pyproject.toml,
-# not here: GOOGLE_DEMO_REFRESH_TOKEN, GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET. No
-# network outside a test marked live or network, no rate-limit waits, and every
-# RefreshTokenAuth sends PLACEHOLDER_KEY as the refresh token, pinned on EnvKeyAuth. What
-# stays here is which accounts exist in a test: demo only.
+# Core's plugin keeps the default run offline and free of real keys (sdk-core ADR-0035),
+# runs anyio tests on asyncio and serves the family check in tests/test_family.py; the
+# variables it sets to the placeholder are named under xippios_placeholder_key_envs in
+# pyproject.toml, not here: GOOGLE_DEMO_REFRESH_TOKEN, GOOGLE_CLIENT_ID and
+# GOOGLE_CLIENT_SECRET. No network outside a test marked live or network, no rate-limit
+# waits, and every RefreshTokenAuth sends PLACEHOLDER_KEY as every credential of the
+# refresh, pinned on RenewingBearerAuth.credential. What stays here is which accounts
+# exist in a test: demo only.
 pytest_plugins = ["xippios.core.testing.plugin"]
 
-DEMO_TOKEN = TENANTS.var(DEMO, "REFRESH_TOKEN")
-_ACCOUNT_TOKEN = re.compile(r"GOOGLE_[A-Z0-9_]+_REFRESH_TOKEN")
-
-
-def _strip_productive_accounts() -> None:
-    """Remove ``GOOGLE_ACCOUNTS`` and every account's refresh token but demo's.
-
-    Runs once, when pytest imports this file, before any fixture of any scope: no
-    session- or module-scoped fixture, and no test, can see another account's name or
-    token. Demo's token stays for the live tests, and so do ``GOOGLE_CLIENT_ID`` and
-    ``GOOGLE_CLIENT_SECRET``, the OAuth client every account shares.
-    """
-    for name in list(os.environ):
-        if name == TENANTS.list_var or (_ACCOUNT_TOKEN.fullmatch(name) and name != DEMO_TOKEN):
-            del os.environ[name]
-
-
-_strip_productive_accounts()
+# Once, when pytest imports this file, before any fixture of any scope: GOOGLE_ACCOUNTS and
+# every account's refresh token but demo's go, GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET
+# stay, so no test sees another account (conventions §7; sdk-core ADR-0042, decision 1).
+keep_reserved_tenants(TENANTS)
 
 
 @pytest.fixture(autouse=True)

@@ -10,9 +10,8 @@ The release's pull request changes only the files of conventions §12: `pyprojec
 `uv.lock`, `CHANGELOG.md`, `README.md`, `CLAUDE.md` and the fragments under
 `changelog/`, which it deletes. §12 also names `docs/handover.md`, which is sdk-core's
 file and not one a source must have. What a release needs beyond these files comes in a
-pull request of its own before it: the removal of a core pin (step 1) and a refresh of
-the packaged reference data that changed a record (step 2). A template release is taken
-in a pull request of its own as well, never in a release's:
+pull request of its own before it: the removal of a core pin (step 1). A template release
+is taken in a pull request of its own as well, never in a release's:
 `uvx --from 'copier>=9.19' copier update --defaults --vcs-ref=<tag>`, with
 `-d core_version=X.Y.Z` where it carries a new core minor, its conflicts resolved and the
 Hand-apply entries of sdk-template's `CHANGELOG.md` since the tag `.copier-answers.yml`
@@ -32,12 +31,8 @@ checklist, https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.m
    core bound, in a pull request of its own before the release's: it changes
    `.copier-answers.yml`, which a release does not. `publish.yml` refuses to tag a pinned
    release as well.
-2. **Reference data.** Where the source packages lists, run `/refresh-reference-data`
-   before the release; the release's pull request fetches nothing. The refresh is a pull
-   request of its own, before the release's, only when a record changed or `fetched`
-   goes from a bare date to the full time; otherwise it gets none, and the release's pull
-   request cites the run, "unchanged" meaning the records, not the files (conventions
-   §12).
+2. **Reference data.** None: the source packages no lists (`has_reference_data` is
+   false in `.copier-answers.yml`), so the release cites no refresh.
 3. **Live evidence.** The release's pull request cites a green run of `live.yml` on the
    commit of `main` it starts from: the nightly run, or, where none ran after the last
    pull request before the release, one dispatch of `live.yml` on `main`. An adoption
@@ -47,10 +42,13 @@ checklist, https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.m
    (`XIPPIOS_LIVE_TESTS=1`), run them first,
    `uv run pytest -m live --tb=short --assert=plain`, so that a failure shows before the
    dispatch spends a run.
-4. SemVer check: pre-1.0, a breaking change bumps the minor. An upstream API change that
-   changed our public surface is a breaking change. Read the fragments under `changelog/`
-   and what `## [Unreleased]` holds, and confirm that the version matches them; say so in
-   the pull request if it does not.
+4. SemVer check (conventions §12): pre-1.0, only a breaking change bumps the minor, and
+   added tasks or parameters make a patch. An upstream API change that changed our public
+   surface is a breaking change, and so is an adoption of a core minor, whatever else the
+   release brings: it moves the core bound to the new minor, so the release no longer
+   installs beside a package still bound to the old one, and the adoption's fragment names
+   that minor. Read the fragments under `changelog/` and what `## [Unreleased]` holds, and
+   confirm that the version matches them; say so in the pull request if it does not.
 5. `pyproject.toml`: set `version`, the version `publish.yml` tags, then `uv lock`. A
    first release keeps the scaffold's `0.1.0`: its CHANGELOG section alone makes it a
    release.
@@ -67,8 +65,8 @@ checklist, https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.m
    current.
 8. Run the checks,
    `uv run ruff check . && uv run ruff format --check . && uv run mypy && uv run pytest && uv run pre-commit run --all-files`.
-9. **The report.** The release's pull request names the version and cites the
-   reference-data run of step 2 and the live run of step 3. Then stop: once it is on
+9. **The report.** The release's pull request names the version and cites the live run
+   of step 3. Then stop: once it is on
    `main`, `publish.yml` tags `v<version>` and waits for a maintainer's approval of the
    `pypi` run. A first release needs PyPI's pending publisher before that approval, with
    project name `xippios-google-mail`, the distribution's name in `pyproject.toml`,

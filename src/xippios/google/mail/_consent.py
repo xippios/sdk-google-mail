@@ -7,12 +7,12 @@ Usage::
 
 ``--scopes`` defaults to ``read``, so the re-run that an expired or revoked refresh
 token's message names (``... re-run xippios-google-mail-auth --account <name> and set
-GOOGLE_<NAME>_REFRESH_TOKEN``, ADR-0025 D-b) consents the read set as printed; a
+GOOGLE_<NAME>_REFRESH_TOKEN``, sdk-core ADR-0025 D-b) consents the read set as printed; a
 deployment that writes re-runs with ``--scopes write``, as the scope refusal's message
 says (D-c).
 
 What it does, in order (the loopback flow with PKCE of
-``docs/upstream/pages/oauth2-native-app.md``; ADR-0025):
+``docs/upstream/pages/oauth2-native-app.md``; sdk-core ADR-0025):
 
 1. Reads the operator's Desktop-app OAuth client from ``GOOGLE_CLIENT_ID`` and
    ``GOOGLE_CLIENT_SECRET`` (the pair every account and every Google source shares).

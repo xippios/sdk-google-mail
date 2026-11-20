@@ -1,10 +1,11 @@
-"""RefreshTokenAuth (ADR-0025, D-b): one refresh, its reuse, the 401 retry, the refusals, no disk.
+"""RefreshTokenAuth (sdk-core ADR-0025, D-b): the refresh, the 401 retry, the refusals, no disk.
 
 Every exchange is a recorded one: the refresh (``oauth2_token/ok``), the token endpoint's
 ``invalid_grant`` and ``invalid_client``, the profile and its 401 to a garbage bearer
-(``get_profile/unauthenticated``). Offline, core's plugin pins ``EnvKeyAuth.key`` and sets
-``GOOGLE_DEMO_REFRESH_TOKEN``, ``GOOGLE_CLIENT_ID`` and ``GOOGLE_CLIENT_SECRET`` to its
-placeholder (``xippios_placeholder_key_envs``), so the refresh sends the placeholder.
+(``get_profile/unauthenticated``). Offline, core's plugin pins
+``RenewingBearerAuth.credential`` and sets ``GOOGLE_DEMO_REFRESH_TOKEN``,
+``GOOGLE_CLIENT_ID`` and ``GOOGLE_CLIENT_SECRET`` to its placeholder
+(``xippios_placeholder_key_envs``), so the refresh sends the placeholder.
 """
 
 import json
@@ -25,7 +26,6 @@ from xippios.google.mail import api, tasks
 from xippios.google.mail._auth import (
     CLIENT_ID_ENV,
     CLIENT_SECRET_ENV,
-    EXPIRY_MARGIN,
     SCOPE_SETS,
     TOKEN_URL,
     RefreshTokenAuth,
@@ -107,9 +107,9 @@ async def test_a_token_is_renewed_within_the_margin_of_its_expiry(
     replay_fixture("get_profile", "ok")
     expires_in = json.loads(recorded("oauth2_token", "ok").response.body)["expires_in"]
     clock = Clock()
-    client, _ = demo_client(clock)
+    client, auth = demo_client(clock)
     await api.get_profile(client)
-    clock.now += expires_in - EXPIRY_MARGIN - 1
+    clock.now += expires_in - auth.margin - 1
     await api.get_profile(client)
     assert token.call_count == 1, "outside the margin the token is reused"
     clock.now += 2

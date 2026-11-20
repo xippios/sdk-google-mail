@@ -20,6 +20,7 @@ from urllib.parse import parse_qsl, urlsplit
 import httpx
 import pytest
 import respx
+from xippios.core.testing import sent_bodies
 
 from xippios.google.mail import _consent
 from xippios.google.mail._auth import CLIENT_ID_ENV, CLIENT_SECRET_ENV, SCOPE_SETS, TOKEN_URL
@@ -157,7 +158,7 @@ def test_one_consent_prints_the_refresh_token_once_and_stores_nothing(
     assert REFRESH not in err
     assert "set GOOGLE_WORK_REFRESH_TOKEN to it, and list work in GOOGLE_ACCOUNTS" in err
     assert "expires in 604799 s (7.0 days)" in err
-    sent = dict(parse_qsl(token.calls.last.request.content.decode()))
+    sent = sent_bodies(token)[-1]
     assert sent["grant_type"] == "authorization_code"
     assert sent["code"] == "the-code"
     assert sent["redirect_uri"] == f"http://127.0.0.1:{port}/"

@@ -17,7 +17,6 @@ The method's media upload (``/upload/gmail/v1/...``) is not used: the message go
 from typing import Any
 
 from xippios.core import AsyncClient, parse
-from xippios.core.client import decode_json
 
 from xippios.google.mail._client import SOURCE
 from xippios.google.mail.models import Draft
@@ -33,7 +32,7 @@ async def drafts_create(client: AsyncClient, *, raw: str, thread_id: str | None 
 
     Sends ``{"message": {"raw": raw, "threadId": thread_id}}``, ``threadId`` left out
     when ``None``. A ``POST`` is never retried after a 5xx or a transport failure
-    (ADR-0011).
+    (sdk-core ADR-0011).
 
     Args:
         client: The account's client, ``_client.client_for(account)``.
@@ -45,5 +44,5 @@ async def drafts_create(client: AsyncClient, *, raw: str, thread_id: str | None 
     message: dict[str, Any] = {"raw": raw}
     if thread_id is not None:
         message["threadId"] = thread_id
-    response = await client.request("POST", "drafts", json={"message": message})
-    return parse(Draft, decode_json(response, source=SOURCE), source=SOURCE, endpoint=ENDPOINT)
+    answer = await client.post_json("drafts", json={"message": message})
+    return parse(Draft, answer, source=SOURCE, endpoint=ENDPOINT)

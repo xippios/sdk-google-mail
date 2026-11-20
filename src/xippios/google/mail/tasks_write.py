@@ -1,11 +1,11 @@
 """Write tasks for Gmail: drafts created and deleted, messages sent, relabelled and trashed.
 
 Served only by ``xippios-google-mail-mcp-write``, never by the read server and never on
-the HTTP router (conventions §8; ADR-0026: read and write never mix). ``__all__`` lists
+the HTTP router (conventions §8; sdk-core ADR-0026: read and write never mix). ``__all__`` lists
 the sync names; ``mcp_write.py`` registers exactly them.
 
 ``account: str`` is the first, required parameter of every write task, and ``confirm:
-bool = False`` its last (ADR-0014, decision 9). The gate is ``confirm is True``: from
+bool = False`` its last (sdk-core ADR-0036, decision 9). The gate is ``confirm is True``: from
 Python, anything but ``True`` (``"true"``, ``1``) previews; over MCP the tool schema turns
 ``"true"``, ``"yes"``, ``"1"`` and ``1`` into ``True`` and ``"false"``, ``"no"``, ``"0"``
 and ``0`` into ``False``, and refuses anything else.
@@ -37,7 +37,7 @@ and ``0`` into ``False``, and refuses anything else.
 ``cc``, ``bcc``, ``subject`` and ``in_reply_to_message_id`` under the task's names and
 the ``threadId`` sent, for a modify ``id``, ``addLabelIds`` and ``removeLabelIds`` under
 upstream's; never the message's ``body``, which goes to upstream inside ``raw`` and
-nowhere else (ADR-0017; conventions §4). ``published_at`` and ``vintage`` stay empty.
+nowhere else (sdk-core ADR-0017; conventions §4). ``published_at`` and ``vintage`` stay empty.
 
 Quota units (``docs/upstream/pages/quota.md``): ``create_draft`` 10, ``send_message``
 100, ``delete_draft`` 10, ``modify_message`` 5, ``trash_message`` 20; a reply 20 more for

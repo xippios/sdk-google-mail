@@ -1,14 +1,14 @@
 """The account registry for Gmail: one configured ``AsyncClient`` per account (conventions §6).
 
 Gmail serves every mailbox under a grant of its own, an account's refresh token issued to
-the operator's Desktop-app OAuth client (ADR-0025). So there is no single client here:
+the operator's Desktop-app OAuth client (sdk-core ADR-0025). So there is no single client here:
 every task takes ``account``, the name of an account declared in the environment, and
 ``client_for(account)`` returns that account's own client, with its own renewing bearer
 (``RefreshTokenAuth``, ``_auth.py``), its own token bucket, its own quota policy and no
 response cache.
 
-The registry is the package's own ``Tenants`` (``_tenants.py``, copied from sdk-cashctrl,
-queue row 281), ``TENANTS`` below; the environment is the contract (conventions §7):
+The registry is core's ``Tenants``, ``TENANTS`` below; the environment is the contract
+(conventions §7):
 
 - ``GOOGLE_ACCOUNTS``: comma-separated names matching ``^[a-z0-9_]+$``, e.g. ``work,private``;
 - per name, ``GOOGLE_<NAME>_REFRESH_TOKEN``, the name upper-cased
@@ -19,18 +19,21 @@ queue row 281), ``TENANTS`` below; the environment is the contract (conventions 
   ``GOOGLE_DEMO_REFRESH_TOKEN`` is set. Fixtures, live tests and the fixture recorder use
   ``demo`` and nothing else.
 
-The registry's first argument is the variable prefix every Google source shares,
-``google``, not this package's slug, so its messages say "google" (ADR-0025, D-b).
-``TENANTS.names()`` lists the declared accounts, ``TENANTS.require(account)`` refuses an
-undeclared one with ``InvalidRequestError`` (the caller's mistake), and a malformed list
+The registry names this package's slug, ``google-mail``, so its errors name the source,
+and its variables keep the prefix every Google source shares, ``GOOGLE`` (``var_prefix``;
+sdk-core ADR-0025, amendment 2026-11-18, (b)); ``account`` is the task parameter that names an
+account, declared once on the registry (``param``). ``TENANTS.names()`` lists the
+declared accounts, ``TENANTS.require(account)`` refuses an undeclared one with
+``InvalidRequestError`` (the caller's mistake), and a malformed list
 is a ``ConfigError`` naming the variable, never a value (the operator's). The client is
 kept under a digest of the refresh token, the one long-lived credential, so a refresh,
-which changes only the access token in memory, rebuilds no client (ADR-0025, D-b).
+which changes only the access token in memory, rebuilds no client (sdk-core ADR-0025, D-b).
 Nothing here spans accounts: ``TENANTS.names()`` returns names only, never values.
 """
 
 import dataclasses
 import functools
+import os
 import re
 from typing import Any
 
@@ -39,10 +42,14 @@ from xippios.core import (
     AsyncClient,
     AuthError,
     ClientConfig,
+    ConfigError,
+    EnvVar,
     QuotaPolicy,
     RateLimit,
     RateLimitError,
+    Tenants,
     XippiosError,
+    request_description,
 )
 
 from xippios.google.mail._auth import (
@@ -52,7 +59,6 @@ from xippios.google.mail._auth import (
     scope_set_for,
     short_scope,
 )
-from xippios.google.mail._tenants import Tenants
 from xippios.google.mail._version import __version__
 
 __all__ = [
@@ -60,6 +66,7 @@ __all__ = [
     "BASE_URL",
     "DAILY_LIMIT_WAIT",
     "DEMO",
+    "ENV_VARS",
     "QUOTA_REASONS",
     "QUOTA_WINDOW",
     "RATE_LIMIT",
@@ -67,6 +74,7 @@ __all__ = [
     "SOURCE",
     "TENANTS",
     "account_config",
+    "check_account",
     "classify",
     "client_for",
     "config",
@@ -80,13 +88,27 @@ BASE_URL = "https://gmail.googleapis.com/gmail/v1/users/me"
 # No API key exists: an account's bearer is renewed from its refresh token
 # (RefreshTokenAuth), so the template's key variable stays None.
 API_KEY_ENV: str | None = None
-# A self-imposed pace (ADR-0010, decision 1): upstream documents its limit in quota units,
-# 6,000 a minute per user per project (docs/upstream/pages/quota.md), not in requests, so
-# 60 requests a minute per account stays under it unless the calls are dear (a full
-# threads.get costs 120 units); the QuotaPolicy below is the backstop (queue rows 143, 299).
+ENV_VARS: tuple[EnvVar, ...] = (
+    EnvVar("GOOGLE_ACCOUNTS", secret=False, required=False),
+    EnvVar("GOOGLE_<NAME>_REFRESH_TOKEN", secret=True, required=True),
+    EnvVar("GOOGLE_CLIENT_ID", secret=True, required=True),
+    EnvVar("GOOGLE_CLIENT_SECRET", secret=True, required=True),
+)
+"""The variables the package reads, for a host (conventions §7; sdk-core ADR-0026, amendment
+2026-11-18, point c): the account list, one refresh token per account, ``demo``'s
+``GOOGLE_DEMO_REFRESH_TOKEN`` among them, and the OAuth client pair every account shares.
+An ``EnvVar`` names a variable and reads none."""
+# Paced under the limit upstream documents; CLAUDE.md gives both (sdk-core ADR-0033 decision 1).
+# Upstream documents its limit in quota units, 6,000 a minute per user per project
+# (docs/upstream/pages/quota.md), not in requests. The sustained pace, 60 a minute, keeps
+# the calls of 100 units or fewer within it, 60 messages.send spending 6,000. It can pass
+# the quota twice: the burst lets 70 messages.send through in a minute from idle, 7,000
+# units, and 51 full threads.get, what get_thread sends, spend 6,120. The QuotaPolicy below
+# backs both.
 RATE_LIMIT = RateLimit(per_minute=60, burst=10)
-"""Per account and self-imposed, 60 a minute with bursts of 10: ``client_for`` gives each
-account a client, and each client a token bucket of its own."""
+"""Per account, 60 a minute with bursts of 10, under upstream's per-user quota in units for
+every call but the two above: ``client_for`` gives each account a client, and each client a
+token bucket of its own, 10 requests at once, then one a second."""
 
 QUOTA_REASONS = frozenset({"rateLimitExceeded", "userRateLimitExceeded"})
 """The reasons of upstream's HTTP 403 to a spent per-minute limit (``handle-errors.md``)."""
@@ -102,12 +124,34 @@ DEMO = "demo"
 """The reserved account, declared by ``GOOGLE_DEMO_REFRESH_TOKEN`` alone and never listed."""
 
 TENANTS = Tenants(
-    "google",
+    SOURCE,
+    var_prefix="GOOGLE",
     list_var="GOOGLE_ACCOUNTS",
+    param="account",
     fields=("REFRESH_TOKEN",),
     reserved=(DEMO,),
 )
-"""Gmail's accounts, declared in the environment (ADR-0025, D-b)."""
+"""Gmail's accounts, declared in the environment (sdk-core ADR-0025, D-b)."""
+
+
+def check_account(account: str) -> None:
+    """Stop a server bound to ``account`` at startup when its refresh token is unset.
+
+    ``serve_tenants`` calls it after ``TENANTS.require``, so ``--account <name>`` fails
+    before anything is served; the token itself is read on the first request.
+
+    Raises:
+        ConfigError: ``GOOGLE_<NAME>_REFRESH_TOKEN`` is unset or blank; the message names
+            the variable and the consent command that prints the token, never a value.
+    """
+    variable = TENANTS.var(account, "REFRESH_TOKEN")
+    if not os.environ.get(variable, "").strip():
+        raise ConfigError(
+            f"{variable} is not set; export the refresh token "
+            f"{CONSENT_COMMAND} --account {account} printed",
+            source=SOURCE,
+        )
+
 
 _SCOPE_PARAM = re.compile(r'(?:^|[\s,])scope="([^"]*)"')
 """The ``scope`` parameter of a ``WWW-Authenticate: Bearer`` challenge, space-separated."""
@@ -144,7 +188,7 @@ def quota_spent(response: httpx.Response) -> float | None:
 
     Upstream answers a spent per-minute limit with HTTP 403 and the reason
     ``rateLimitExceeded`` or ``userRateLimitExceeded``, no quota header and no
-    ``Retry-After`` (``handle-errors.md``; F8), so the policy reads that answer (ADR-0015);
+    ``Retry-After`` (``handle-errors.md``; F8), so the policy reads that answer (sdk-core ADR-0037);
     ``None`` for every other response.
     """
     if response.status_code == 403 and _reason(response) in QUOTA_REASONS:
@@ -210,7 +254,7 @@ def classify(
       ``AuthError`` naming the scopes the account was granted and the scope set to
       re-consent with, ``...: account <name> was granted gmail.readonly; this tool needs
       gmail.modify; re-run xippios-google-mail-auth --account <name> --scopes write``
-      (ADR-0025, D-c). The shape is the one recorded on 2026-10-29 (F19,
+      (sdk-core ADR-0025, D-c). The shape is the one recorded on 2026-10-29 (F19,
       ``tests/fixtures/messages_modify/insufficient_permissions.json``), not the 401
       ``authError`` the error page folds it into: ``status`` ``PERMISSION_DENIED`` and a
       ``WWW-Authenticate: Bearer error="insufficient_scope", scope="..."`` header listing
@@ -244,7 +288,7 @@ def classify(
     if status not in (401, 403):
         return None
     reason = _reason(response)
-    where = f"{response.request.method} {response.request.url.path}"
+    where = request_description(response)
     named = f"account {auth.account}" if auth is not None else "the account"
     if status == 403 and reason in QUOTA_REASONS:
         return RateLimitError(
@@ -302,8 +346,8 @@ def account_config(auth: RefreshTokenAuth) -> ClientConfig:
     """``config`` for the account ``auth`` signs for: its ``classify`` and its quota policy.
 
     ``classify`` is bound to ``auth``, so the scope refusal names that account's granted
-    scopes. A ``QuotaPolicy`` of its own is installed (ADR-0010, decisions 1 and 4;
-    ADR-0015): no quota header is read (upstream sends none, F8), ``spent`` reads the 403
+    scopes. A ``QuotaPolicy`` of its own is installed (sdk-core ADR-0033, decisions 1 and 4;
+    sdk-core ADR-0037): no quota header is read (upstream sends none, F8), ``spent`` reads the 403
     of a spent per-minute quota (``quota_spent``) and ``window`` is ``QUOTA_WINDOW``, so
     an account request in that minute waits out what is left of it when that is within
     the policy's ``pause_cap`` (30 s), and is otherwise refused with ``RateLimitError``

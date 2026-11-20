@@ -1,13 +1,15 @@
 # Nightly live smoke tests (conventions §10): every test marked `live` against the real
 # upstream, on a schedule and on demand, never on a pull request.
-# Rendered by the template (the one workflow that is): each secret it names is a variable
-# its live tests read, from the answer live_secrets, and its start time derives from the
-# slug.
+# Rendered by the template (the one workflow that is): the secrets it names are the reserved
+# tenant's credential, from the answer tenant_credential_env, then the keys of the answer
+# source_dependencies (sdk-core ADR-0021) and the variables of the answer live_secrets, and
+# its start time derives from the slug.
 name: Live
 
 on:
   schedule:
-    # 02:37 UTC, derived from the slug (live_schedule in sdk-template's copier.yml).
+    # 02:37 UTC, staggered from the slug (live_schedule in sdk-template's copier.yml)
+    # so that sources sharing a key do not start together.
     - cron: "37 2 * * *"
   workflow_dispatch:
 
@@ -33,10 +35,11 @@ jobs:
       # assertion prints the line and AssertionError alone, never the values it compared,
       # a record of the upstream among them, here or in the summary of -ra.
       - run: uv run pytest -m live --tb=short --assert=plain
-        # The variables live_secrets names, each from the secret of the same name, for
-        # this step only: checkout, setup-uv and uv sync never see them.
+        # The reserved tenant's credential, then the other variables the answers name, each
+        # from the secret of the same name, for this step only: checkout, setup-uv and uv
+        # sync never see them.
         env:
           XIPPIOS_LIVE_TESTS: "1"
+          GOOGLE_DEMO_REFRESH_TOKEN: ${{ secrets.GOOGLE_DEMO_REFRESH_TOKEN }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          GOOGLE_DEMO_REFRESH_TOKEN: ${{ secrets.GOOGLE_DEMO_REFRESH_TOKEN }}

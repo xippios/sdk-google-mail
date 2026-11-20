@@ -1,6 +1,7 @@
 Add an endpoint wrapper and a task function for the Gmail operation: $ARGUMENTS
 
-Follow the three layers (ADR-0001) exactly. The change meets sdk-core's definition of done,
+Follow the three layers (sdk-core ADR-0001) exactly. The change meets sdk-core's
+definition of done,
 https://github.com/xippios/sdk-core/blob/main/docs/definition-of-done.md, and its review
 checklist, https://github.com/xippios/sdk-core/blob/main/docs/review-checklist.md: step 9
 lists what they check in an endpoint.
@@ -20,9 +21,7 @@ lists what they check in an endpoint.
    Dates become `datetime.date`/`datetime`, numbers become `int`/`Decimal`/`float`,
    upstream enumerations become `StrEnum`, an enumeration of integer ids `IntEnum`
    (conventions §3). No renaming to match another source. An enumeration written by
-   hand, for a value set upstream documents and no packaged list renders, lives here
-   too, by the family's precedent: `enums.py` is generated whole
-   (`/refresh-reference-data`).
+   hand, for a value set upstream documents, lives here too, by the family's precedent.
 
 3. **Endpoint wrapper** in `src/xippios/google/mail/api/<wrapper>.py`, or in the
    service's module where operation ids repeat across services and the Layout in
@@ -35,7 +34,9 @@ lists what they check in an endpoint.
    restates the path and a name taken from the path among them. The verbatim id stays in
    the first line of the wrapper's docstring and in the `endpoint=` the wrapper passes, so
    `meta.endpoint` keeps upstream's exact name. Parameters as upstream names them,
-   snake_cased; it calls `xippios.google.mail._client.client` and returns models via
+   snake_cased; it takes `account`, the tenant's name, and calls
+   `xippios.google.mail._client.client_for(account)`, that tenant's own client, and
+   returns models via
    `xippios.core.parse(...)`. It calls `get_json`, or `get_answer` where the answer may
    come from the cache, whose `retrieved_at` the task puts into its `ResultMeta`, or
    `get` and then `decode_json` where it needs more of the response, a header say
@@ -43,23 +44,38 @@ lists what they check in an endpoint.
    checks: upstream's documented error shapes go into `classify` in `_client.py`, an
    error class of the package's own into `errors.py` (conventions §5, §6).
 
+   An operation that upstream serves from another host than `BASE_URL`'s follows the
+   rule of one limiter per host (conventions §2, §6). A second base URL on the same host
+   goes through `client_for(account)` by its absolute URL, and `classify`'s path checks name both
+   bases. An origin or mirror that the publisher runs itself, where its canonical host
+   refuses automated requests, takes that host's pace through the same client, and
+   `docs/upstream/` names both hosts; a mirror that anyone else runs is never sent to. A
+   host that a dependency sends to is reached through the dependency's tasks alone, never
+   by a wrapper here. Any other host gets a client of its own in `_client.py`, its base
+   URL and its `RateLimit` beside the first's, and its row in the table of `CLAUDE.md`,
+   with its pace and where the pace comes from, in the same pull request.
+
 4. **Task function** in `src/xippios/google/mail/tasks.py`: an async function shaped
    like what a person or agent wants (`get_<thing>(...)`, with the parameters a caller
    thinks in), composing wrappers, resolving pagination with `xippios.core.paginate_*`
    and reference lookups, and returning `Result[T]` with full `ResultMeta` (`source`,
    `endpoint`, `request`, and `published_at` / `vintage` when upstream provides them). Then:
    `get_<thing> = sync(get_<thing>_async)`, add `"get_<thing>"` to `__all__`, and
-   re-export it from `__init__.py`. A projection the task returns leaves out documented
+   re-export it from `__init__.py`.
+   It takes `account: str`, one tenant, required with no default, and hands it to
+   each wrapper it calls: the family check holds every task to it but the tenant list and
+   those `NO_TENANT_TASKS` names (conventions §7).
+   A projection the task returns leaves out documented
    personal identifiers (`ssn`, `iban` and their like) unless the task fetches them
-   deliberately and says so in its docstring (ADR-0017). A list task whose whole list an
-   agent needs, longer than the default result cap, gets a cap of its own in `MCP_CAPS`
-   (ADR-0016). So does a task whose result is one upstream page that must return whole, a
-   cursor-paged page with the `next_token` the caller needs for the next page or a
-   bounded lookup: a byte bound of its own, the row bound unchanged, and where the
-   upstream bills per result, the docstring states the price per result (conventions §8;
-   ADR-0016, amendment 2026-10-30). A bulk task, one that returns a file or a list read
-   from one, is named in `BULK_TASKS` beside it: Python-only, no tool and no route
-   (ADR-0019 decision 4).
+   deliberately and says so in its docstring (sdk-core ADR-0017). A list task whose whole
+   list an agent needs, longer than the default result cap, gets a cap of its own in
+   `MCP_CAPS` (sdk-core ADR-0038). So does a task whose result is one upstream page that
+   must return whole, a cursor-paged page with the `next_token` the caller needs for the
+   next page or a bounded lookup: a byte bound of its own, the row bound unchanged, and
+   where the upstream bills per result, the docstring states the price per result
+   (conventions §8; sdk-core ADR-0038, decision 4). A bulk task, one that returns a file
+   or a list read from one, is named in `BULK_TASKS` beside it: Python-only, no tool and
+   no route (sdk-core ADR-0040 decision 4).
 
 5. **Docstring for agents** on the task: first line one sentence; then an `Args:` block
    explaining every parameter with examples of valid values. The MCP tool description and
@@ -75,11 +91,39 @@ lists what they check in an endpoint.
    `tests/test_tasks.py`: `copier update` never touches a file the template has never
    rendered, and `tests/test_tasks.py` itself is the source's once rendered. A replay
    test that checks what was sent compares `xippios.core.testing.sent_query(route)`, the
-   scrubbed query of the last request, or `sent_urls(route)`, the URLs with credentials
-   redacted, never a request kept from `route.calls`, which a failure or `pytest -l`
-   would print. A test of a task that answers from a packaged list reads the list's
+   scrubbed query of the last request, `sent_urls(route)`, the URLs with credentials
+   redacted, or `sent_bodies(route)`, the bodies decoded, a JSON body as it parses and a
+   form as a mapping of its fields, credentials redacted, never a request kept from
+   `route.calls`, which a failure or `pytest -l` would print. A test of a task that answers from a packaged list reads the list's
    fetch date and counts from the packaged file instead of pinning them, so a refresh of
    the list breaks no test. Grep the fixture for key patterns before committing.
+
+   A task that writes upstream goes into `src/xippios/google/mail/tasks_write.py`
+   and its `__all__`, with `confirm: bool = False` as its last parameter. The source's
+   first write task brings the test of the write server, in `tests/test_tasks_write.py`:
+   core's `assert_write_tools` holds that the write server serves exactly the write
+   tasks, each taking `confirm` last, and that none of them is a tool of the read server
+   or a route of the router (conventions §8). It lists the tools on the test's own loop,
+   so the test awaits it under `@pytest.mark.anyio`:
+
+   ```python
+   import pytest
+   from xippios.core.testing import assert_write_tools
+
+   from xippios.google.mail import http, mcp, mcp_write, tasks_write
+   from xippios.google.mail._client import SOURCE
+
+
+   @pytest.mark.anyio
+   async def test_the_write_server_serves_write_tasks_only() -> None:
+       await assert_write_tools(
+           mcp_write.server,
+           [getattr(tasks_write, name) for name in tasks_write.__all__],
+           source=SOURCE,
+           read_server=mcp.server,
+           router=http.router,
+       )
+   ```
 
 7. **Docs.** A changelog fragment under `changelog/`, one file holding the change's
    bullet, as `changelog/README.md` lays it out. The README status table under
@@ -94,15 +138,16 @@ lists what they check in an endpoint.
    `Result[T]` with an agent docstring, and is in the README status table.
 
 9. **Done** when each of these holds, the definition of done's checks of an endpoint:
-   - the change sits in its layer, and `mcp.py` and `http.py` hold no logic (ADR-0001);
+   - the change sits in its layer, and `mcp.py` and `http.py` hold no logic
+     (sdk-core ADR-0001);
    - the wrapper matches `docs/upstream/`: its name, its parameters and their semantics;
    - the task returns `Result[T]` with full `ResultMeta`, raises only from the taxonomy
      of conventions §5, and has its agent docstring;
    - `__init__.py` exports the task and the README status table lists it;
    - the task has a replay test on a recorded fixture and a live smoke test, and each
      fixture this change adds is recorded, free of key patterns and of the values of the
-     fields the source keeps out of its projections (ADR-0017), and under 256 KiB
-     (ADR-0019);
+     fields the source keeps out of its projections (sdk-core ADR-0017), and under 256 KiB
+     (sdk-core ADR-0040);
    - the changelog fragment says what the change adds for a user of the package;
    - the README says what changed in install, usage or endpoint coverage;
    - the checks of step 8 pass.

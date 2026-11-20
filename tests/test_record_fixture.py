@@ -25,6 +25,8 @@ from xippios.core.testing import (
     ReplayFixture,
     Scrub,
     fixture_from_response,
+    fixture_text,
+    sent_bodies,
     sent_urls,
 )
 
@@ -82,7 +84,7 @@ def test_the_refresh_is_written_without_a_credential(recorder: ModuleType) -> No
         "client_id=REDACTED&client_secret=REDACTED&grant_type=refresh_token&refresh_token=REDACTED"
     )
     assert json.loads(fixture.response.body)["access_token"] == REDACTED
-    text = recorder.to_json(fixture)
+    text = fixture_text(fixture)
     assert recorder.check(text, fixture, SECRETS) == []
     for shape in recorder.TOKEN_SHAPES:
         assert shape not in text
@@ -93,7 +95,7 @@ def test_core_alone_leaves_the_encoded_refresh_token_which_the_check_refuses(
 ) -> None:
     """A refresh token's ``/`` is ``%2F`` in a form body: core's plain scrub misses it."""
     fixture = fixture_from_response(refresh_exchange(), scrub=Scrub(secrets=SECRETS))
-    leaks = recorder.check(recorder.to_json(fixture), fixture, SECRETS)
+    leaks = recorder.check(fixture_text(fixture), fixture, SECRETS)
     assert "a value of the refresh token, the client pair or an answer's token" in leaks
     assert "a refresh token's shape (1//)" in leaks
 
@@ -101,9 +103,9 @@ def test_core_alone_leaves_the_encoded_refresh_token_which_the_check_refuses(
 def test_every_address_becomes_the_placeholder(recorder: ModuleType) -> None:
     fixture = scrubbed(recorder, profile_exchange())
     assert json.loads(fixture.response.body)["emailAddress"] == "user@example.com"
-    assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == []
+    assert recorder.check(fixture_text(fixture), fixture, SECRETS) == []
     raw = fixture_from_response(profile_exchange())
-    leaks = recorder.check(recorder.to_json(raw), raw, SECRETS)
+    leaks = recorder.check(fixture_text(raw), raw, SECRETS)
     assert leaks == ["an e-mail address other than user@example.com"]
 
 
@@ -111,9 +113,9 @@ def test_a_token_field_left_in_an_answer_is_refused(recorder: ModuleType) -> Non
     request = httpx.Request("POST", "https://oauth2.googleapis.com/token")
     response = httpx.Response(200, json={"id_token": "an-unknown-value"}, request=request)
     raw = fixture_from_response(response)
-    assert recorder.check(recorder.to_json(raw), raw, []) == ["a value under id_token"]
+    assert recorder.check(fixture_text(raw), raw, []) == ["a value under id_token"]
     fixture = recorder.rewrite(raw, [])
-    assert recorder.check(recorder.to_json(fixture), fixture, []) == []
+    assert recorder.check(fixture_text(fixture), fixture, []) == []
 
 
 def test_forms_of_a_secret_cover_the_encodings(recorder: ModuleType) -> None:
@@ -386,7 +388,7 @@ def test_a_message_s_bodies_are_decoded_scrubbed_and_encoded_again(recorder: Mod
     assert "raw" not in message
     assert parts_of(message["payload"])[4]["body"]["attachmentId"] == "att-1"
     assert (message["id"], message["threadId"]) == (original["id"], original["threadId"])
-    assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == []
+    assert recorder.check(fixture_text(fixture), fixture, SECRETS) == []
 
 
 def test_bytes_in_another_charset_survive_the_body_scrub(recorder: ModuleType) -> None:
@@ -434,12 +436,12 @@ def test_an_attachment_id_is_numbered_in_the_path_and_the_body_alike(
     fixture = scrubbed(recorder, response)
     assert fixture.request.url == f"{MESSAGE_URL}/attachments/att-1"
     assert json.loads(fixture.response.body)["attachmentId"] == "att-1"
-    assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == []
+    assert recorder.check(fixture_text(fixture), fixture, SECRETS) == []
 
 
 def test_an_unscrubbed_message_is_refused(recorder: ModuleType) -> None:
     raw = fixture_from_response(message_exchange(made_up_message()))
-    leaks = recorder.check(recorder.to_json(raw), raw, SECRETS)
+    leaks = recorder.check(fixture_text(raw), raw, SECRETS)
     assert leaks == [
         "an e-mail address other than user@example.com",
         "a <...@...> other than <n@example.com> and <user@example.com>, in the fixture's "
@@ -459,8 +461,8 @@ def test_an_address_left_in_a_decoded_body_is_refused(recorder: ModuleType) -> N
     left = fixture.model_copy(
         update={"response": fixture.response.model_copy(update={"body": json.dumps(message)})}
     )
-    assert "bob@x.example" not in recorder.to_json(left)
-    leaks = recorder.check(recorder.to_json(left), left, SECRETS)
+    assert "bob@x.example" not in fixture_text(left)
+    leaks = recorder.check(fixture_text(left), left, SECRETS)
     assert leaks == ["an e-mail address other than user@example.com"]
 
 
@@ -481,7 +483,7 @@ def test_a_link_in_angle_brackets_is_no_message_id(recorder: ModuleType) -> None
     fixture = scrubbed(recorder, message_exchange(message))
     data = json.loads(fixture.response.body)["payload"]["body"]["data"]
     assert "Email=user@example.com&x=1>" in unb64url(data).decode()
-    assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == []
+    assert recorder.check(fixture_text(fixture), fixture, SECRETS) == []
 
 
 def test_an_unnumbered_id_in_a_decoded_body_is_refused_by_where(recorder: ModuleType) -> None:
@@ -495,7 +497,7 @@ def test_an_unnumbered_id_in_a_decoded_body_is_refused_by_where(recorder: Module
         }
     )
     fixture = scrubbed(recorder, message_exchange(message))
-    assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == [
+    assert recorder.check(fixture_text(fixture), fixture, SECRETS) == [
         "a <...@...> other than <n@example.com> and <user@example.com>, in a decoded body.data"
     ]
 
@@ -515,14 +517,14 @@ def test_a_profile_picture_url_is_redacted(recorder: ModuleType) -> None:
     )
     raw = fixture_from_response(message_exchange(message))
     assert "a Google account's profile-picture URL" in recorder.check(
-        recorder.to_json(raw), raw, SECRETS
+        fixture_text(raw), raw, SECRETS
     )
     fixture = scrubbed(recorder, message_exchange(message))
     scrubbed_message = json.loads(fixture.response.body)
     page_after = unb64url(scrubbed_message["payload"]["body"]["data"]).decode()
     assert 'src="https://lh3.googleusercontent.com/a/REDACTED"' in page_after
     assert scrubbed_message["snippet"] == "see https://lh3.googleusercontent.com/a/REDACTED"
-    assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == []
+    assert recorder.check(fixture_text(fixture), fixture, SECRETS) == []
 
 
 def test_a_task_recording_writes_each_exchange_under_the_task(
@@ -636,12 +638,12 @@ def test_a_write_s_raw_is_dropped_from_the_request_body(recorder: ModuleType) ->
     fixture = scrubbed(recorder, send_exchange(raw))
     assert json.loads(fixture.request.body or "") == {"threadId": "t1"}, "raw goes, ids stay"
     assert json.loads(fixture.response.body)["labelIds"] == ["SENT"]
-    assert recorder.check(recorder.to_json(fixture), fixture, SECRETS) == []
+    assert recorder.check(fixture_text(fixture), fixture, SECRETS) == []
 
 
 def test_a_raw_left_in_the_request_body_is_refused(recorder: ModuleType) -> None:
     raw = fixture_from_response(send_exchange(b64url("Subject: xippios-live\r\n\r\nhello")))
-    leaks = recorder.check(recorder.to_json(raw), raw, SECRETS)
+    leaks = recorder.check(fixture_text(raw), raw, SECRETS)
     assert leaks == ["a raw field, a whole message, in the request body"]
 
 
@@ -709,7 +711,7 @@ def test_a_composing_recording_sends_to_demo_alone_and_keeps_no_raw(
     argv = ["send_message", "ok", "subject=xippios-live send", "body=hello", "confirm=true"]
     assert recorder.main(argv) == 0
     assert profile.call_count == 1, "the profile is read, outside the recording"
-    raw = json.loads(sent.calls.last.request.content)["raw"]
+    raw = sent_bodies(sent)[-1]["raw"]
     message = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)).decode()
     address = json.loads(own["response"]["body"])["emailAddress"]
     assert f"To: {address}\r\n" in message
