@@ -9,8 +9,7 @@ MCP and over HTTP alike. Types follow the schemas of ``docs/upstream/discovery.j
 ``historyId``, stays the string it is; ``internalDate``, a timestamp upstream sends as
 a string of epoch milliseconds, is parsed to an aware UTC ``datetime``
 (``EpochMillis``), since conventions §3 types dates and times. A documented value set is
-a ``StrEnum`` written here (``LabelType``), since no packaged list renders it into
-``enums.py``. A field the schema has and an answer may leave out is ``None`` by default,
+a ``StrEnum`` written here (``LabelType``), since the package packages no list. A field the schema has and an answer may leave out is ``None`` by default,
 a list ``[]``.
 
 Three kinds of model live here. The models of the endpoint wrappers are faithful
