@@ -43,6 +43,7 @@ from xippios.core import (
     AuthError,
     ClientConfig,
     ConfigError,
+    EnvVar,
     QuotaPolicy,
     RateLimit,
     RateLimitError,
@@ -65,6 +66,7 @@ __all__ = [
     "BASE_URL",
     "DAILY_LIMIT_WAIT",
     "DEMO",
+    "ENV_VARS",
     "QUOTA_REASONS",
     "QUOTA_WINDOW",
     "RATE_LIMIT",
@@ -86,10 +88,21 @@ BASE_URL = "https://gmail.googleapis.com/gmail/v1/users/me"
 # No API key exists: an account's bearer is renewed from its refresh token
 # (RefreshTokenAuth), so the template's key variable stays None.
 API_KEY_ENV: str | None = None
-# A self-imposed pace (ADR-0010, decision 1): upstream documents its limit in quota units,
-# 6,000 a minute per user per project (docs/upstream/pages/quota.md), not in requests, so
-# 60 requests a minute per account stays under it unless the calls are dear (a full
-# threads.get costs 120 units); the QuotaPolicy below is the backstop (queue rows 143, 299).
+ENV_VARS: tuple[EnvVar, ...] = (
+    EnvVar("GOOGLE_ACCOUNTS", secret=False, required=False),
+    EnvVar("GOOGLE_<NAME>_REFRESH_TOKEN", secret=True, required=True),
+    EnvVar("GOOGLE_CLIENT_ID", secret=True, required=True),
+    EnvVar("GOOGLE_CLIENT_SECRET", secret=True, required=True),
+)
+"""The variables the package reads, for a host (conventions §7; sdk-core ADR-0026, amendment
+2026-11-18, point c): the account list, one refresh token per account, ``demo``'s
+``GOOGLE_DEMO_REFRESH_TOKEN`` among them, and the OAuth client pair every account shares.
+An ``EnvVar`` names a variable and reads none."""
+# Paced under the limit upstream documents; CLAUDE.md gives both (sdk-core ADR-0033 decision 1).
+# Upstream documents its limit in quota units, 6,000 a minute per user per project
+# (docs/upstream/pages/quota.md), not in requests: at 60 requests a minute an account spends
+# at most 6,000 units on the calls of 100 units or fewer, messages.send the dearest, and only
+# a full threads.get, 120 units, could pass it; the QuotaPolicy below is the backstop.
 RATE_LIMIT = RateLimit(per_minute=60, burst=10)
 """Per account and self-imposed, 60 a minute with bursts of 10: ``client_for`` gives each
 account a client, and each client a token bucket of its own."""
