@@ -98,11 +98,14 @@ The read server's tools are read-only and named `google_mail_<verb>_<noun>`. Res
 200 rows or 64 KB unless a tool has a cap of its own, with a note on how to see the rest.
 `google_mail_search_messages` reads at most 50 messages a call (a list and one call per
 message, 5 + 20 quota units each), and `google_mail_get_thread` reads a long thread in
-parts with `start` and `limit`: a cut answer ends with where to resume.
+parts with `start` and `limit`: a cut answer ends with where to resume, or says that the
+message at its start alone passes the cap, which `google_mail_get_message` reads.
 `google_mail_get_message` returns a message over the cap as its first 64 KB with a note:
 `include_html=False` leaves the HTML out, and the rest is read in a mail client.
-`--account <name>` binds the server to one account: every tool acts on it and takes no
-`account`. `--http` serves streamable HTTP instead of stdio, on a loopback `--host` only
+The server serves every declared account, and every tool but `google_mail_list_accounts`
+takes `account`. `--account <name>` binds the server to one account: every tool acts on it,
+takes no `account` and refuses a call that names one, and the server stops at startup
+unless that account is declared with its refresh token. `--http` serves streamable HTTP instead of stdio, on a loopback `--host` only
 (`127.0.0.1`, `localhost`, `::1`): the server reaches every declared mailbox and carries no
 authentication, so serving it beyond loopback takes `--allow-remote` and a gateway in front.
 
