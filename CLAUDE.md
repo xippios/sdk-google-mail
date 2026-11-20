@@ -160,10 +160,10 @@ uv run xippios-google-mail-mcp-write --account demo  # the write tools; --http o
 xippios-google-mail-auth --account demo   # --scopes read by default; a consent: the operator's step
 xippios-google-mail-auth --account demo --scopes write   # gmail.modify, for the write tools
 
-direnv exec ~/github/sdk uv run scripts/record_fixture.py get_profile ok   # demo only
-direnv exec ~/github/sdk uv run scripts/record_fixture.py search_messages ok \
+direnv exec . uv run scripts/record_fixture.py get_profile ok   # demo only
+direnv exec . uv run scripts/record_fixture.py search_messages ok \
   q=newer_than:1y max_results=2   # through the task: ok.json, ok_2.json, ok_3.json
-direnv exec ~/github/sdk uv run scripts/record_fixture.py send_message ok \
+direnv exec . uv run scripts/record_fixture.py send_message ok \
   'subject=xippios-live send' body=hi confirm=true   # a write task, to demo itself
 ```
 
@@ -271,8 +271,8 @@ semantics or the shape of the public API.
 
 `GOOGLE_CLIENT_SECRET`, every `GOOGLE_<NAME>_REFRESH_TOKEN` and any access token are never
 read by value, printed, logged or written to a file or a commit, and `.envrc` is never
-read; code reads the variables by name. They reach a process only through `direnv exec`
-from the family workspace's root, whose `.envrc` holds them, or through the org secrets.
+read; code reads the variables by name. They reach a process only through `direnv exec .`
+in the clone or a worktree, from an `.envrc` no commit holds, or through the org secrets.
 No process listing or environment dump (`env`, `printenv`, `set`, `export`, `ps`,
 `/proc/*/environ`). A fixture is recorded through the recorder's scrub only, never by
 hand: `scripts/record_fixture.py` records through `client_for("demo")` only, with core's

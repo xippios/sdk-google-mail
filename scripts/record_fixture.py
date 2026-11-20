@@ -2,8 +2,8 @@
 
 Run from the repository root with demo's refresh token and the OAuth client pair
 (``GOOGLE_DEMO_REFRESH_TOKEN``, ``GOOGLE_CLIENT_ID``, ``GOOGLE_CLIENT_SECRET``) in the
-environment, which reach a process only through ``direnv exec`` from the family's root.
-With ``R`` for ``direnv exec ~/github/sdk uv run scripts/record_fixture.py``::
+environment, which reach a process only through direnv, from an ``.envrc`` no commit holds.
+With ``R`` for ``direnv exec . uv run scripts/record_fixture.py``::
 
     R oauth2_token ok
     R oauth2_token invalid_grant --garbage-token
@@ -56,7 +56,7 @@ grant without ``gmail.modify`` upstream refuses it (the scope refusal, F19), and
 with it, an empty modify changes no label.
 
 A write task's name (``WRITE_TASKS``) records through the task the same way, under the
-write safety rule (the briefing's "Write safety"): demo writes to itself only, and every
+write safety rule (``CLAUDE.md``, Gmail specifics): demo writes to itself only, and every
 message it writes carries ``MARK``, ``xippios-live``, in its Subject.
 
 - ``to``, ``cc`` and ``bcc`` are no parameters of a recording, refused before any

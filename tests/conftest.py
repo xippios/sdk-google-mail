@@ -1,4 +1,4 @@
-# This file is the template's, edited by hand for the account model (class human).
+# This file is the template's, edited by hand for the account model; keep the edits at an update.
 import contextlib
 import os
 import sys
