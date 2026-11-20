@@ -29,6 +29,7 @@ testing = ["xippios-core[testing]~=0.4.0"]
 [project.scripts]
 xippios-google-mail-mcp-read = "xippios.google.mail.mcp:run"
 xippios-google-mail-mcp-write = "xippios.google.mail.mcp_write:run"
+xippios-google-mail-auth = "xippios.google.mail._consent:run"
 
 [project.urls]
 Homepage = "https://github.com/xippios/sdk-google-mail"
@@ -107,6 +108,6 @@ testpaths = ["tests"]
 # record_property, in a live test say, warns under xunit2 when a run writes --junitxml.
 junit_family = "xunit1"
 # Core's plugin sets them to the placeholder key in every test not marked live
-# (sdk-core ADR-0035), the reserved account's credential first, the one
-# credential of this package's own that a test reads.
-xippios_placeholder_key_envs = ["GOOGLE_DEMO_REFRESH_TOKEN"]
+# (sdk-core ADR-0035), the reserved account's credential first: demo's refresh token and
+# the OAuth client pair, each a variable RefreshTokenAuth reads when it refreshes.
+xippios_placeholder_key_envs = ["GOOGLE_DEMO_REFRESH_TOKEN", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]
