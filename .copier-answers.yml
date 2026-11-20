@@ -7,6 +7,7 @@ core_git_ref: ''
 core_version: 0.3.0
 gateway: none
 has_files: false
+has_reference_data: false
 human: jdidaskalu
 import_path: google.mail
 live_secrets: '[GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_DEMO_REFRESH_TOKEN]'
@@ -16,5 +17,8 @@ rate_limit_provenance: self-imposed
 source_dependencies: '[]'
 source_name: Gmail
 source_slug: google-mail
+tenant_credential_env: GOOGLE_<NAME>_REFRESH_TOKEN
+tenant_param: account
 upstream_docs_url: https://developers.google.com/workspace/gmail/api/reference/rest
 upstream_url: https://developers.google.com/workspace/gmail/api
+write_server: true
