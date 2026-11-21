@@ -4,16 +4,109 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/) (pre-1.0: breaking changes bump the minor).
 
-## [Unreleased]
+## [0.2.0] - 2026-11-21
 
 ### Changed
 
-- Adopts sdk-template v0.3.2, from v0.3.0.
+- Every answer the tests serve or read without a recording says where it comes from and
+  which kind of sdk-core's conventions §10 it is, and three tests serve a recorded answer
+  changed in memory where they built one. A caller sees no change.
+  (https://github.com/xippios/sdk-google-mail/issues/66)
+- A keyed command runs as `direnv exec .` from the clone or a worktree, in `CLAUDE.md` and
+  the recorder's docstring, where both named a directory outside the repository. Four
+  docstrings that cited a document no reader can open state their reason, or cite
+  `CLAUDE.md` and sdk-core ADR-0025. (https://github.com/xippios/sdk-google-mail/issues/18)
+- The usage line and the error prefix of `xippios-google-mail-mcp-read` and
+  `xippios-google-mail-mcp-write` name the command that runs, where both named the server,
+  `xippios-google-mail`, and the read server's help of `--allow-remote` speaks of a read
+  server, where it spoke of a write server. The read server's refusal of a remote `--host`
+  is core's, `xippios-google-mail is a read server held to loopback and carries no
+  authentication`, where the package's own said that the server reaches mailboxes, and it
+  comes after the check of `--account`, where the package's came first.
+  (https://github.com/xippios/sdk-core/issues/167)
+- A route answers an argument that its parameter's type refuses, or one that is missing,
+  as problem details before the task runs: status 422, title `InvalidRequestError` and
+  the detail `<argument>: <message>`, as the MCP tools word it. FastAPI's own 422 answered
+  a `detail` list that echoed the value sent. (https://github.com/xippios/sdk-core/issues/66)
+- The refusal of a `max_results` over 50 by `search_messages` ends naming the tool of
+  `list_messages` too, `(over MCP, the tool google_mail_list_messages)`, where it named
+  the task alone. (https://github.com/xippios/sdk-core/issues/111)
+- A `google_mail_get_thread` answer whose message at `start` alone passes the cap says so
+  in its note, `the row at offset <start> alone exceeds the byte cap`, and names no resume
+  offset, where it ended `resume with start=<start>`, the start the call had just used.
+  Such a message reads alone with `google_mail_get_message`, as the note says.
+  (https://github.com/xippios/sdk-core/issues/175)
+- A token endpoint answer other than `invalid_grant` and `invalid_client` is an error that
+  names its status, the request and the reason phrase, `503 from POST /token: Service
+  Unavailable`, and quotes nothing of the answer. Its message and its `body` quoted the
+  answer's text before, which a token endpoint may write from the credentials it was sent.
+  (https://github.com/xippios/sdk-core/issues/156)
+- A tool's error answer sets `isError` on its result beside the text
+  `error: <ErrorClass>: <message>`, an unknown account, a refused argument and a task's
+  refusal alike, where the result was not flagged and a client read the text to tell it
+  from data. (https://github.com/xippios/sdk-core/issues/168)
+- The error of an undeclared account names the source `google-mail`, in the exception's
+  `source` and a route's problem details, where it named `google`, the prefix of the
+  variables, which stays `GOOGLE`. (https://github.com/xippios/sdk-core/issues/279)
+- The account registry, the `--account` lock and its serve command, the renewing bearer,
+  the write requests and the fixture writer are xippios-core 0.4.0's, where the package
+  carried copies of its own. The private modules `_tenants`, `_account_lock` and `_cli` go
+  with them, and core holds the read server to loopback, as it holds the write server.
+  (https://github.com/xippios/sdk-google-mail/issues/19)
+- Adopts sdk-template v0.3.4, from v0.3.2, with conventions 1.27 and no new core minor: the
+  floor stays `xippios-core~=0.3.0`. The README lists the package's documents under
+  `## Documents`, and `CLAUDE.md` holds the rules that `.claude/family.md` carried, which
+  leaves with `/adopt-release`. Changelog entries are fragments under `changelog/`, the
+  package's own decisions go into `docs/adr/` with the index that `scripts/adr_index.py`
+  writes, and a pull request runs the organization's checks from `organization.yml`, where
+  `gates.yml` was. (https://github.com/xippios/sdk-template/releases/tag/v0.3.4,
+  https://github.com/xippios/sdk-google-mail/issues/16)
+- Adopts sdk-template v0.3.2, from v0.3.0, under conventions 1.25 and with no new core minor:
+  the floor stays `xippios-core~=0.3.0`, and no module or test changes. `.github/CODEOWNERS`
+  is rendered from the template's answers and names the code owner whom GitHub asks to review
+  a change to `.github/`, `CLAUDE.md`, `.claude/`, `pyproject.toml` or `.copier-answers.yml`,
+  `.gitignore` leaves copier's `*.rej` and `*.orig` out, and `live.yml` passes the secrets
+  that the answer `live_secrets` names.
+  (https://github.com/xippios/sdk-template/releases/tag/v0.3.2,
+  https://github.com/xippios/sdk-google-mail/pull/15)
 - `.copier-answers.yml` records sdk-template v0.3.2's answer `live_secrets` ahead of its
   adoption: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_DEMO_REFRESH_TOKEN`, the
   client pair and demo's refresh token that the nightly live tests read. The adoption then
   renders `live.yml` passing the three secrets from this answer, where a hand edit passed
   them; under sdk-template v0.4.0 the answer `tenant_credential_env` names demo's instead.
+
+### Breaking
+
+- `xippios.google.mail.mcp.build()` and `xippios.google.mail.mcp_write.build()` return
+  core's `ToolSet`, the tools a host serves as the entry point does, and take core's
+  `TenantLock`, where they returned the server and took the package's own `AccountLock`.
+  A host that built a server from `build()` passes the tool set to
+  `xippios.core.mcp.build_server`, binds it with `build(TenantLock(TENANTS, "<account>"))`,
+  `TENANTS` of `xippios.google.mail._client`, and reads the variables the package needs
+  from the modules' new `ENV_VARS`, while `mcp.server` and `mcp_write.server` are the
+  servers as before. (https://github.com/xippios/sdk-core/issues/245,
+  https://github.com/xippios/sdk-core/issues/166)
+- A tool of either server refuses an argument it does not declare, before it runs, and
+  names the ones it takes, where the argument was dropped and the tool ran with its
+  defaults. So a server that `--account` binds refuses a call that still names `account`,
+  where it answered it for the bound account, and a client drops the argument.
+  (https://github.com/xippios/sdk-core/issues/84)
+- The modules `xippios.google.mail.params` and `xippios.google.mail.enums` are gone, with
+  the package's `reference/` directory. They held no list: `params.PACKAGED_LISTS` was
+  empty and `enums` defined no enumeration, so a caller that imported either drops the
+  import, and `LabelType` and the other value sets stay in `xippios.google.mail.models`.
+  (https://github.com/xippios/sdk-google-mail/issues/58)
+- Adopts sdk-template v0.4.0, from v0.3.4, with `core_version=0.4.0`,
+  `live_secrets=[GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET]`,
+  `rate_limit_provenance=below-documented`. The package runs on `xippios-core~=0.4.0`
+  under conventions 1.28, and the four answers recorded ahead of the update,
+  `write_server=true`, `tenant_param=account`,
+  `tenant_credential_env=GOOGLE_<NAME>_REFRESH_TOKEN` and `has_reference_data=false`,
+  render its two servers, their binding to one account and the live run's credentials,
+  and drop the reference scaffold.
+  (https://github.com/xippios/sdk-template/releases/tag/v0.4.0,
+  https://github.com/xippios/sdk-google-mail/issues/59,
+  https://github.com/xippios/sdk-google-mail/issues/52)
 
 ## [0.1.0] - 2026-10-29
 
