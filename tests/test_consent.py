@@ -9,7 +9,9 @@ page's table of the exchange answer, in the shape ``oauth2_token/ok`` was record
 tokens made up (conventions §10, kind 2). The refusal is ``oauth2_token/invalid_grant``'s
 body, an ``invalid_grant`` the page documents for the exchange (kind 2). The answer without
 a ``refresh_token`` is the recorded ``oauth2_token/ok``, the refresh's, given in memory for
-the exchange's at the same endpoint (kind 3, within one operation).
+the exchange's at the same endpoint (kind 3, within one operation). The snapshot documents
+such an answer only for a request without ``access_type=offline``, which the tool sends, so
+its test asserts what ``_report`` does with one, never that upstream sends it.
 """
 
 import base64
@@ -238,8 +240,12 @@ def test_an_answer_without_a_refresh_token_prints_none(
 ) -> None:
     """NOT RECORDED as such: the body of ``oauth2_token/ok``, the token endpoint's recorded
     answer to a refresh, which carries no ``refresh_token``, stands in memory for the code
-    exchange's, sent to the same endpoint, whose answer ``oauth2-web-server.md`` documents
-    without one too (conventions §10, kind 3, within one operation)."""
+    exchange's at the same endpoint (conventions §10, kind 3, within one operation). The
+    snapshot documents an exchange answer without a ``refresh_token`` only for an
+    authorization request without ``access_type=offline`` (``oauth2-web-server.md``, the
+    table of the answer). The tool sends ``offline``, and ``oauth2-native-app.md`` says an
+    installed application always gets a refresh token. So the test asserts what ``_report``
+    does with such an answer, never that upstream sends it after ``offline``."""
     answer = json.loads(load_fixture(fixture_path(FIXTURES, "oauth2_token", "ok")).response.body)
     assert _consent._report(_answer(200, answer), "demo", "read") == 1
     assert capsys.readouterr().out == ""
