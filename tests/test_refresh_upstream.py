@@ -4,7 +4,9 @@ Nothing here sends a request: ``render_fetched``, ``write_snapshot`` and ``compa
 what a capture run fetched, here one row made up for the test alone, written under
 ``tmp_path``, never to ``docs/upstream/``. ``OBSERVED.md`` is the one file under
 ``docs/upstream/`` written by hand (conventions §3, sdk-core ADR-0028), which the table
-lists in a row of its own where it exists.
+lists in a row of its own where it exists. NOT RECORDED: the made-up row's answer, at the
+quota page's URL, holds the first heading of the snapshot's ``pages/quota.md`` (conventions
+§10, kind 2).
 """
 
 import importlib.util

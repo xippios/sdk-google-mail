@@ -5,7 +5,10 @@ Offline, in process: the package's modules, both MCP servers through an in-proce
 endpoint's refusals through ``respx``. ``mcp.build()`` and ``mcp_write.build()`` are the
 tool sets a host serves (conventions §8; sdk-core ADR-0026, amendment 2026-11-18, points c
 and d), and ``_client.ENV_VARS`` the variables the package reads, for that host. Every
-refusal below comes before a request to Gmail, so nothing is sent.
+refusal below comes before a request to Gmail, so nothing is sent. NOT RECORDED as served
+(conventions §10): the token endpoint's answer, a recording changed in memory, as its
+test says, and the thread's decoded views, built in memory, the package's own projection,
+which no answer of Gmail's carries.
 """
 
 import importlib.util
@@ -22,6 +25,7 @@ from mcp.client import Client
 from mcp.types import TextContent
 from xippios.core import AuthError, EnvVar, Result, ResultMeta, TenantLock, UpstreamError
 from xippios.core.mcp import ToolSet, build_server, cap_result, is_loopback_only
+from xippios.core.testing import fixture_path, load_fixture
 
 import xippios.google.mail
 from xippios.google.mail import mcp, mcp_write, tasks, tasks_write
@@ -29,6 +33,8 @@ from xippios.google.mail._auth import TOKEN_URL
 from xippios.google.mail._client import DEMO, ENV_VARS, SOURCE, TENANTS
 from xippios.google.mail.http import router
 from xippios.google.mail.models import DecodedMessage
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 def test_the_package_ships_no_reference_scaffold() -> None:
@@ -254,12 +260,20 @@ def test_a_thread_cut_whose_first_message_alone_passes_the_cap_names_no_resume()
 def test_a_token_answer_the_package_does_not_know_is_quoted_nowhere(
     respx_mock: respx.MockRouter, status: int, error: type[Exception], message: str
 ) -> None:
-    """Not ``invalid_grant`` or ``invalid_client``: the status, the request and the reason
-    phrase, and nothing of the answer, which a token endpoint may write from the
-    credentials it was sent; the message and the body quoted it before."""
-    described = "Missing required parameter: refresh_token"
+    """Not the two the package knows, HTTP 400 ``invalid_grant`` and HTTP 401
+    ``invalid_client``: the status, the request and the reason phrase, and nothing of the
+    answer, which a token endpoint may write from the credentials it was sent; the message
+    and the body quoted it before.
+
+    NOT RECORDED as such: ``oauth2_token/invalid_client``, the token endpoint's recorded
+    refusal of the client, its body and headers as recorded, served in memory at HTTP 400,
+    403 and 503, statuses the endpoint was not seen to send it with (conventions §10,
+    kind 4).
+    """
+    refused = load_fixture(fixture_path(FIXTURES, "oauth2_token", "invalid_client")).response
+    described = json.loads(refused.body)["error_description"]
     respx_mock.post(TOKEN_URL).mock(
-        return_value=httpx.Response(status, json={"error": "x", "error_description": described})
+        return_value=httpx.Response(status, headers=refused.headers, content=refused.content)
     )
     with pytest.raises(error) as info:
         tasks.get_profile(DEMO)

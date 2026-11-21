@@ -3,6 +3,13 @@
 No consent is run (a consent is the operator's step): the browser is a plain ``urllib``
 request to the loopback listener, and the token endpoint a ``respx`` route whose answer
 is written here, shaped as ``docs/upstream/pages/oauth2-native-app.md``'s exchange answer.
+
+NOT RECORDED, since no code exchange is recorded: ``READ_ANSWER`` is composed from that
+page's table of the exchange answer, in the shape ``oauth2_token/ok`` was recorded, its
+tokens made up (conventions §10, kind 2). The refusal is ``oauth2_token/invalid_grant``'s
+body, an ``invalid_grant`` the page documents for the exchange (kind 2), and one test drops
+the answer's ``refresh_token``, which the page says an installed application always gets
+(kind 4's form).
 """
 
 import base64
