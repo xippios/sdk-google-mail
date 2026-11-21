@@ -55,7 +55,7 @@ src/xippios/google/mail/
   api/             endpoint wrappers, one module per upstream operation (conventions §2),
                    named by its method id minus the shared gmail.users.: get_profile,
                    labels_list, messages_list, messages_get, threads_get and
-                   messages_attachments_get, the last without a task in 0.1.0; the
+                   messages_attachments_get, the last without a task in 0.2.0; the
                    writes drafts_create, drafts_delete, messages_send, messages_modify
                    and messages_trash
   tasks.py         task functions; __all__ is what the adapters register, but BULK_TASKS,
