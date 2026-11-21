@@ -464,8 +464,8 @@ def test_internal_date_is_parsed_to_an_aware_utc_datetime() -> None:
     """``internalDate``, epoch milliseconds as a string, kept to the millisecond.
 
     NOT RECORDED: messages built in memory, ``internalDate`` as the discovery document
-    gives it (conventions §10, kind 2), and ``soon``, a form upstream was not seen to send
-    (kind 4's form).
+    gives it (conventions §10, kind 2); ``soon`` is an input to the model under test and
+    no answer of Gmail's.
     """
     message = Message.model_validate({"id": "m1", "internalDate": "1793267674123"})
     assert message.internal_date == datetime(2026, 10, 29, 9, 54, 34, 123000, tzinfo=UTC)
@@ -476,8 +476,8 @@ def test_internal_date_is_parsed_to_an_aware_utc_datetime() -> None:
 
 
 def test_internal_date_keeps_an_aware_datetime_as_it_is() -> None:
-    """NOT RECORDED: a ``datetime``, which no answer carries, given as Python code may, and
-    an ``int``, a form upstream was not seen to send (conventions §10, kind 4's form)."""
+    """NOT RECORDED: the ``datetime`` and the ``int`` are inputs to the model under test,
+    as Python code may give them, and no answer of Gmail's."""
     sent_at = datetime(2026, 10, 29, 10, 54, 34, tzinfo=timezone(timedelta(hours=1)))
     message = Message.model_validate({"id": "m1", "internalDate": sent_at})
     assert message.internal_date == sent_at
@@ -520,8 +520,8 @@ def test_internal_date_keeps_an_aware_datetime_as_it_is() -> None:
 def test_internal_date_refuses_every_other_shape(value: object, says: str) -> None:
     """A refusal is core's ``ValidationError``, naming the shape and never the value.
 
-    NOT RECORDED: a message built in memory (conventions §10, kind 2), each ``value`` as
-    its ``internalDate`` a form upstream was not seen to send (kind 4's form).
+    NOT RECORDED: each ``value`` is an input to ``parse`` and the model under test, given
+    as a message's ``internalDate``, and no answer of Gmail's.
     """
     with pytest.raises(ValidationError) as info:
         parse(Message, {"id": "m1", "internalDate": value}, source=SOURCE, endpoint=GET)
@@ -618,9 +618,9 @@ def test_the_decoder_walks_the_tree_by_role() -> None:
 
 
 def test_the_decoder_s_edges() -> None:
-    """NOT RECORDED: the module's messages built in memory (conventions §10, kind 2), one
-    with ``abcde``, a ``body.data`` that is no base64url, a form upstream was not seen to
-    send (kind 4's form)."""
+    """NOT RECORDED: the module's messages built in memory (conventions §10, kind 2).
+    ``abcde``, a ``body.data`` that is no base64url, is an input to the decoder under test
+    and no answer of Gmail's; the assertion names the built message, ``m1``."""
     html_only = made_up(leaf("", "text/html", b64url("<b>x</b>")))
     assert decode_message(html_only, endpoint=GET).text is None
     empty = made_up(leaf("", "text/plain"))
@@ -672,7 +672,7 @@ def test_every_read_task_has_a_sync_twin() -> None:
 
 
 def test_a_decode_error_names_the_operation_the_message_came_from() -> None:
-    """NOT RECORDED: as in ``test_the_decoder_s_edges``, ``abcde`` (kind 4's form)."""
+    """NOT RECORDED: ``abcde`` is an input to the decoder under test, no answer of Gmail's."""
     broken = made_up(leaf("", "text/plain", "abcde"))
     with pytest.raises(ValidationError, match=r"^google-mail gmail.users.threads.get: message m1"):
         decode_message(broken, endpoint=THREAD)

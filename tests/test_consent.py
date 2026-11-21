@@ -7,13 +7,14 @@ is written here, shaped as ``docs/upstream/pages/oauth2-native-app.md``'s exchan
 NOT RECORDED, since no code exchange is recorded: ``READ_ANSWER`` is composed from that
 page's table of the exchange answer, in the shape ``oauth2_token/ok`` was recorded, its
 tokens made up (conventions §10, kind 2). The refusal is ``oauth2_token/invalid_grant``'s
-body, an ``invalid_grant`` the page documents for the exchange (kind 2), and one test drops
-the answer's ``refresh_token``, which the page says an installed application always gets
-(kind 4's form).
+body, an ``invalid_grant`` the page documents for the exchange (kind 2). The answer without
+a ``refresh_token`` is the recorded ``oauth2_token/ok``, the refresh's, given in memory for
+the exchange's at the same endpoint (kind 3, within one operation).
 """
 
 import base64
 import hashlib
+import json
 import secrets
 import socket
 import threading
@@ -22,16 +23,18 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
+from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 import pytest
 import respx
-from xippios.core.testing import sent_bodies
+from xippios.core.testing import fixture_path, load_fixture, sent_bodies
 
 from xippios.google.mail import _consent
 from xippios.google.mail._auth import CLIENT_ID_ENV, CLIENT_SECRET_ENV, SCOPE_SETS, TOKEN_URL
 
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 STATE = "fixed-state-for-the-test"
 REFRESH = "test-refresh-token-value"  # pragma: allowlist secret (a made-up value)
 READ_ANSWER = {
@@ -233,7 +236,11 @@ def test_demo_is_declared_by_its_token_alone(capsys: pytest.CaptureFixture[str])
 def test_an_answer_without_a_refresh_token_prints_none(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    answer = {key: value for key, value in READ_ANSWER.items() if key != "refresh_token"}
+    """NOT RECORDED as such: the body of ``oauth2_token/ok``, the token endpoint's recorded
+    answer to a refresh, which carries no ``refresh_token``, stands in memory for the code
+    exchange's, sent to the same endpoint, whose answer ``oauth2-web-server.md`` documents
+    without one too (conventions §10, kind 3, within one operation)."""
+    answer = json.loads(load_fixture(fixture_path(FIXTURES, "oauth2_token", "ok")).response.body)
     assert _consent._report(_answer(200, answer), "demo", "read") == 1
     assert capsys.readouterr().out == ""
 
