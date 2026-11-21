@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Every answer the tests serve or read without a recording says where it comes from and
+  which kind of sdk-core's conventions §10 it is, and three tests serve a recorded answer
+  changed in memory where they built one. A caller sees no change.
+  (https://github.com/xippios/sdk-google-mail/issues/66)
 - A keyed command runs as `direnv exec .` from the clone or a worktree, in `CLAUDE.md` and
   the recorder's docstring, where both named a directory outside the repository. Four
   docstrings that cited a document no reader can open state their reason, or cite
@@ -57,7 +61,14 @@ All notable changes to this project are documented here. The format follows
   writes, and a pull request runs the organization's checks from `organization.yml`, where
   `gates.yml` was. (https://github.com/xippios/sdk-template/releases/tag/v0.3.4,
   https://github.com/xippios/sdk-google-mail/issues/16)
-- Adopts sdk-template v0.3.2, from v0.3.0.
+- Adopts sdk-template v0.3.2, from v0.3.0, under conventions 1.25 and with no new core minor:
+  the floor stays `xippios-core~=0.3.0`, and no module or test changes. `.github/CODEOWNERS`
+  is rendered from the template's answers and names the code owner whom GitHub asks to review
+  a change to `.github/`, `CLAUDE.md`, `.claude/`, `pyproject.toml` or `.copier-answers.yml`,
+  `.gitignore` leaves copier's `*.rej` and `*.orig` out, and `live.yml` passes the secrets
+  that the answer `live_secrets` names.
+  (https://github.com/xippios/sdk-template/releases/tag/v0.3.2,
+  https://github.com/xippios/sdk-google-mail/pull/15)
 - `.copier-answers.yml` records sdk-template v0.3.2's answer `live_secrets` ahead of its
   adoption: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_DEMO_REFRESH_TOKEN`, the
   client pair and demo's refresh token that the nightly live tests read. The adoption then
