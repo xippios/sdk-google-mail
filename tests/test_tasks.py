@@ -192,7 +192,13 @@ def test_the_second_401_names_the_account_and_the_path() -> None:
 
 
 def granted(scopes: str) -> RefreshTokenAuth:
-    """Demo's auth after a refresh whose answer granted ``scopes``, a made-up answer."""
+    """Demo's auth after a refresh whose answer granted ``scopes``.
+
+    NOT RECORDED: the token answer composed from its table in
+    ``docs/upstream/pages/oauth2-web-server.md``, in the shape ``oauth2_token/ok`` was
+    recorded, its access token made up and ``scopes`` its ``scope``, the documented scopes
+    space-delimited (conventions §10, kind 2).
+    """
     auth = refresh_auth(DEMO)
     request = httpx.Request("POST", TOKEN_URL)
     answer = {
@@ -261,9 +267,31 @@ def test_the_scope_refusal_without_an_auth_names_no_account() -> None:
 
 
 def documented(status: int, reason: str, message: str) -> httpx.Response:
-    """An answer shaped as ``docs/upstream/pages/handle-errors.md``'s sample for ``reason``."""
+    """An answer shaped as ``docs/upstream/pages/handle-errors.md``'s sample for ``reason``.
+
+    NOT RECORDED: composed from the page, a sample's ``reason``, or a row of its table of
+    status codes where it shows no sample (the 429, the 404), in the samples' ``error``
+    shape, which the recorded refusals share (conventions §10, kind 2). ``classify`` reads
+    the ``reason`` of a 401 or 403 alone, ``quota_spent`` that of a 403; neither reads
+    ``message``.
+    """
     body = {"error": {"errors": [{"reason": reason, "message": message}], "code": status}}
     return httpx.Response(status, json=body, request=httpx.Request("GET", PROFILE_URL))
+
+
+def with_reason(endpoint: str, case: str, reason: str) -> httpx.Response:
+    """NOT RECORDED as such: the recorded refusal at its own URL, its first
+    ``error.errors[].reason`` replaced in memory by ``reason``, one upstream was not seen to
+    send there (conventions §10, kind 4)."""
+    fixture = recorded(endpoint, case)
+    body = json.loads(fixture.response.body)
+    body["error"]["errors"][0]["reason"] = reason
+    return httpx.Response(
+        fixture.response.status,
+        headers=fixture.response.headers,
+        json=body,
+        request=httpx.Request(fixture.request.method, fixture.request.url),
+    )
 
 
 @pytest.mark.parametrize(
@@ -293,8 +321,8 @@ def test_the_domain_policy_is_an_auth_error() -> None:
     "response",
     [
         documented(429, "rateLimitExceeded", "Too many requests"),
-        documented(403, "forbidden", "Forbidden"),
-        documented(401, "required", "Login Required"),
+        with_reason("messages_modify", "insufficient_permissions", "forbidden"),
+        with_reason("get_profile", "unauthenticated", "required"),
         documented(404, "notFound", "Not Found"),
         documented(500, "backendError", "Backend Error"),
         httpx.Response(200, json={}, request=httpx.Request("GET", PROFILE_URL)),
@@ -302,6 +330,9 @@ def test_the_domain_policy_is_an_auth_error() -> None:
     ids=["429", "403-other", "401-other", "404", "500", "200"],
 )
 def test_everything_else_is_core_s_mapping(response: httpx.Response) -> None:
+    """NOT RECORDED, all six: the recorded 403 and 401 refusals, each with a reason
+    ``classify`` does not name (kind 4), the page's 429, 404 and 500 (kind 2), and a 200
+    ``{}`` of no shape upstream sends (conventions §10, kind 5). Each is core's to map."""
     assert classify(response, auth=refresh_auth(DEMO)) is None
 
 

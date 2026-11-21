@@ -2,7 +2,8 @@
 
 Every exchange is a recorded one: the refresh (``oauth2_token/ok``), the token endpoint's
 ``invalid_grant`` and ``invalid_client``, the profile and its 401 to a garbage bearer
-(``get_profile/unauthenticated``). Offline, core's plugin pins
+(``get_profile/unauthenticated``). One test serves the refresh's answer changed in memory
+and says so (conventions §10). Offline, core's plugin pins
 ``RenewingBearerAuth.credential`` and sets ``GOOGLE_DEMO_REFRESH_TOKEN``,
 ``GOOGLE_CLIENT_ID`` and ``GOOGLE_CLIENT_SECRET`` to its placeholder
 (``xippios_placeholder_key_envs``), so the refresh sends the placeholder.
@@ -206,8 +207,14 @@ def test_an_unset_client_variable_sends_nothing(
 def test_an_answer_that_is_not_the_documented_one_is_not_quoted(
     respx_mock: respx.MockRouter,
 ) -> None:
-    """A synthetic 200 without the documented fields: refused, nothing of it in the message."""
-    respx_mock.post(TOKEN_URL).respond(200, json={"unexpected": "a-value-never-shown"})
+    """A 200 that is not the documented answer: refused, nothing of it in the message.
+
+    NOT RECORDED as such: ``oauth2_token/ok``'s 200 with its ``expires_in`` replaced in
+    memory by text, a form the token endpoint was not seen to send (conventions §10, kind 4).
+    """
+    fixture = recorded("oauth2_token", "ok")
+    body = json.loads(fixture.response.body) | {"expires_in": "a-value-never-shown"}
+    respx_mock.post(TOKEN_URL).respond(200, headers=fixture.response.headers, json=body)
     with pytest.raises(ValidationError) as info:
         tasks.get_profile(DEMO)
     assert "a-value-never-shown" not in str(info.value)

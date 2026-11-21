@@ -4,9 +4,9 @@ Every Gmail exchange replays the refresh first (``oauth2_token/ok``), then the t
 fixtures, recorded through the tasks under demo's readonly grant on 2026-10-29. Values are
 read from the fixtures, not pinned, so a re-recording breaks no assertion on content.
 What was sent is compared through ``sent_query`` and ``sent_urls``, never a request kept
-from ``route.calls``. The decoder's rules that the recorded mailbox does not show (an
-attachment, a charset, a nested tree) are tested on messages built in memory in the
-discovery document's shape: they test the decoder, not a fixture.
+from ``route.calls``. NOT RECORDED (conventions §10): a recorded list answering another
+query in a test of what was sent (kind 3), and messages built in memory in the discovery
+document's shape for the decoder's rules the recorded mailbox does not show (kind 2).
 """
 
 import base64
@@ -162,7 +162,7 @@ def test_list_messages_sends_include_spam_trash_only_when_true(
     replay_fixture: ReplayFixture,
 ) -> None:
     replay_fixture("oauth2_token", "ok")
-    route = replay_fixture("list_messages", "ok")
+    route = replay_fixture("list_messages", "ok")  # the path alone: the answer stands in
     result = tasks.list_messages(DEMO, include_spam_trash=True, page_token="0123")
     assert sent_query(route) == {"includeSpamTrash": "true", "pageToken": "0123"}
     assert result.meta.request == {"account": DEMO, "includeSpamTrash": True, "pageToken": "0123"}
@@ -461,7 +461,12 @@ def test_a_long_message_comes_back_as_a_preview_and_the_note(
 
 
 def test_internal_date_is_parsed_to_an_aware_utc_datetime() -> None:
-    """``internalDate``, epoch milliseconds as a string, kept to the millisecond."""
+    """``internalDate``, epoch milliseconds as a string, kept to the millisecond.
+
+    NOT RECORDED: messages built in memory, ``internalDate`` as the discovery document
+    gives it (conventions §10, kind 2); ``soon`` is an input to the model under test and
+    no answer of Gmail's.
+    """
     message = Message.model_validate({"id": "m1", "internalDate": "1793267674123"})
     assert message.internal_date == datetime(2026, 10, 29, 9, 54, 34, 123000, tzinfo=UTC)
     assert message.model_dump(mode="json")["internal_date"] == "2026-10-29T09:54:34.123000Z"
@@ -471,6 +476,8 @@ def test_internal_date_is_parsed_to_an_aware_utc_datetime() -> None:
 
 
 def test_internal_date_keeps_an_aware_datetime_as_it_is() -> None:
+    """NOT RECORDED: the ``datetime`` and the ``int`` are inputs to the model under test,
+    as Python code may give them, and no answer of Gmail's."""
     sent_at = datetime(2026, 10, 29, 10, 54, 34, tzinfo=timezone(timedelta(hours=1)))
     message = Message.model_validate({"id": "m1", "internalDate": sent_at})
     assert message.internal_date == sent_at
@@ -511,7 +518,11 @@ def test_internal_date_keeps_an_aware_datetime_as_it_is() -> None:
     ],
 )
 def test_internal_date_refuses_every_other_shape(value: object, says: str) -> None:
-    """A refusal is core's ``ValidationError``, naming the shape and never the value."""
+    """A refusal is core's ``ValidationError``, naming the shape and never the value.
+
+    NOT RECORDED: each ``value`` is an input to ``parse`` and the model under test, given
+    as a message's ``internalDate``, and no answer of Gmail's.
+    """
     with pytest.raises(ValidationError) as info:
         parse(Message, {"id": "m1", "internalDate": value}, source=SOURCE, endpoint=GET)
     assert "first at internalDate (value_error)" in info.value.message
@@ -607,6 +618,9 @@ def test_the_decoder_walks_the_tree_by_role() -> None:
 
 
 def test_the_decoder_s_edges() -> None:
+    """NOT RECORDED: the module's messages built in memory (conventions §10, kind 2).
+    ``abcde``, a ``body.data`` that is no base64url, is an input to the decoder under test
+    and no answer of Gmail's; the assertion names the built message, ``m1``."""
     html_only = made_up(leaf("", "text/html", b64url("<b>x</b>")))
     assert decode_message(html_only, endpoint=GET).text is None
     empty = made_up(leaf("", "text/plain"))
@@ -638,7 +652,9 @@ def test_the_decoder_s_edges() -> None:
 async def test_messages_attachments_get_sends_both_ids_as_path_segments(
     replay_fixture: ReplayFixture, respx_mock: respx.MockRouter
 ) -> None:
-    """A made-up answer in the shape of ``schemas.MessagePartBody``: no attachment exists."""
+    """NOT RECORDED: the recorded mailbox holds no attachment, so the answer is composed
+    from the discovery document's ``schemas.MessagePartBody`` in the shape the recorded
+    messages carry their parts' bodies (conventions §10, kind 2)."""
     replay_fixture("oauth2_token", "ok")
     url = f"{BASE}/messages/19a0b0c0d0e0f001/attachments/att%2F1"
     route = respx_mock.get(url).respond(200, json={"size": 3, "data": b64url("abc")})
@@ -656,6 +672,7 @@ def test_every_read_task_has_a_sync_twin() -> None:
 
 
 def test_a_decode_error_names_the_operation_the_message_came_from() -> None:
+    """NOT RECORDED: ``abcde`` is an input to the decoder under test, no answer of Gmail's."""
     broken = made_up(leaf("", "text/plain", "abcde"))
     with pytest.raises(ValidationError, match=r"^google-mail gmail.users.threads.get: message m1"):
         decode_message(broken, endpoint=THREAD)

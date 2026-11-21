@@ -3,10 +3,20 @@
 No consent is run (a consent is the operator's step): the browser is a plain ``urllib``
 request to the loopback listener, and the token endpoint a ``respx`` route whose answer
 is written here, shaped as ``docs/upstream/pages/oauth2-native-app.md``'s exchange answer.
+
+NOT RECORDED, since no code exchange is recorded: ``READ_ANSWER`` is composed from that
+page's table of the exchange answer, in the shape ``oauth2_token/ok`` was recorded, its
+tokens made up (conventions §10, kind 2). The refusal is ``oauth2_token/invalid_grant``'s
+body, an ``invalid_grant`` the page documents for the exchange (kind 2). The answer without
+a ``refresh_token`` is the recorded ``oauth2_token/ok``, the refresh's, given in memory for
+the exchange's at the same endpoint (kind 3, within one operation). The snapshot documents
+such an answer only for a request without ``access_type=offline``, which the tool sends, so
+its test asserts what ``_report`` does with one, never that upstream sends it.
 """
 
 import base64
 import hashlib
+import json
 import secrets
 import socket
 import threading
@@ -15,16 +25,18 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
+from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 import pytest
 import respx
-from xippios.core.testing import sent_bodies
+from xippios.core.testing import fixture_path, load_fixture, sent_bodies
 
 from xippios.google.mail import _consent
 from xippios.google.mail._auth import CLIENT_ID_ENV, CLIENT_SECRET_ENV, SCOPE_SETS, TOKEN_URL
 
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 STATE = "fixed-state-for-the-test"
 REFRESH = "test-refresh-token-value"  # pragma: allowlist secret (a made-up value)
 READ_ANSWER = {
@@ -226,7 +238,15 @@ def test_demo_is_declared_by_its_token_alone(capsys: pytest.CaptureFixture[str])
 def test_an_answer_without_a_refresh_token_prints_none(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    answer = {key: value for key, value in READ_ANSWER.items() if key != "refresh_token"}
+    """NOT RECORDED as such: the body of ``oauth2_token/ok``, the token endpoint's recorded
+    answer to a refresh, which carries no ``refresh_token``, stands in memory for the code
+    exchange's at the same endpoint (conventions §10, kind 3, within one operation). The
+    snapshot documents an exchange answer without a ``refresh_token`` only for an
+    authorization request without ``access_type=offline`` (``oauth2-web-server.md``, the
+    table of the answer). The tool sends ``offline``, and ``oauth2-native-app.md`` says an
+    installed application always gets a refresh token. So the test asserts what ``_report``
+    does with such an answer, never that upstream sends it after ``offline``."""
+    answer = json.loads(load_fixture(fixture_path(FIXTURES, "oauth2_token", "ok")).response.body)
     assert _consent._report(_answer(200, answer), "demo", "read") == 1
     assert capsys.readouterr().out == ""
 

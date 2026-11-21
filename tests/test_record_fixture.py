@@ -4,6 +4,12 @@
 values below are made up in the shapes Google's credentials take (``1//``, ``GOCSPX-``,
 ``ya29.``); none is a credential. The messages are made up in memory in the shape of the
 discovery document's ``Message`` (``format=full``): they test the scrubber, not a fixture.
+
+NOT RECORDED, since a recording keeps nothing the scrub removes: every exchange below is
+composed from the token answer's table in ``docs/upstream/pages/oauth2-web-server.md``,
+the discovery document's schemas and the shapes the fixtures were recorded in, with
+made-up values (conventions §10, kind 2). The message's ``raw``, beside a ``format=full``
+payload as upstream never sends it, is an input to the scrub under test, no answer of Gmail's.
 """
 
 import base64

@@ -13,7 +13,9 @@ and decoded, and compared with what the task was given.
 
 The composer's, the previews' and the refusals' tests need no fixture: a preview sends
 nothing, which ``respx`` shows by answering nothing; a message built in memory tests the
-composer, not a fixture.
+composer, not a fixture. NOT RECORDED (conventions §10): the original a reply is composed
+from in memory (kind 2), and the recorded answer two confirmed tests serve to a request it
+was not recorded for, within its operation (kind 3); each test says which.
 """
 
 import base64
@@ -255,6 +257,9 @@ def test_a_non_ascii_subject_and_body_survive_raw_as_seven_bit_text() -> None:
 
 
 def test_a_reply_takes_the_original_s_thread_ids_and_subject() -> None:
+    """NOT RECORDED: the original is composed from the discovery document's
+    ``schemas.Message``, its headers as ``create_draft/reply`` recorded them, with a
+    ``References`` that recording lacks (conventions §10, kind 2)."""
     original = Message.model_validate(
         {
             "id": "m1",
@@ -674,6 +679,10 @@ async def test_a_write_under_the_read_grant_tells_the_agent_to_re_consent(
     ``oauth2_token/ok`` grants ``gmail.readonly`` alone, and
     ``messages_modify/insufficient_permissions`` is upstream's refusal of a modify under
     it; the agent reads the re-consent text, never retried.
+
+    NOT RECORDED as such: the recording refused an empty modify, here one that adds
+    ``STARRED``, at the same URL; a grant without ``gmail.modify`` is refused whatever the
+    body asks (conventions §10, kind 3, within one operation).
     """
     replay_fixture("oauth2_token", "ok")
     refused = replay_fixture("messages_modify", "insufficient_permissions")
@@ -730,7 +739,11 @@ def test_a_reply_s_preview_reads_the_original_once(replay_fixture: ReplayFixture
 
 
 def test_a_confirmed_reply_joins_the_thread(replay_fixture: ReplayFixture) -> None:
-    """The recorded draft answers the stored reply; what counts is what was sent."""
+    """The recorded draft answers the stored reply; what counts is what was sent.
+
+    NOT RECORDED as such: ``create_draft/ok``, the recorded new draft, answers the reply's
+    ``drafts.create``, in a test that asserts only what was sent (conventions §10, kind 3).
+    """
     replay_fixture("oauth2_token", "write")
     replay_fixture("create_draft", "reply")
     created = replay_fixture("create_draft", "ok")
