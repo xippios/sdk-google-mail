@@ -8,8 +8,8 @@ and format is ``METADATA``, only include headers specified."). The answer is
 ``schemas.Message``. Quota units (``docs/upstream/pages/quota.md``): 20, or 60 when
 ``format`` is ``full``, upstream's default, or ``raw``.
 
-``raw`` is not offered: 0.1.0 reads no message as its RFC 2822 text (the briefing's
-scope), so ``format`` takes ``minimal``, ``metadata`` or ``full``.
+``raw`` is not offered: no task of 0.1.0 reads a message as its RFC 2822 text, which the
+recorder drops from every answer, so ``format`` takes ``minimal``, ``metadata`` or ``full``.
 """
 
 from typing import Literal

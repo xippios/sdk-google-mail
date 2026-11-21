@@ -11,7 +11,7 @@ attribute chain of a record that holds personal data (a ``Result``, ``Profile``,
 Message-IDs), and ``as_kind`` checks a record's type without printing it.
 
 The write tasks need demo's write grant (``gmail.modify``) and are tested in two
-sequences under the write safety rule (the briefing's "Write safety"): demo writes to
+sequences under the write safety rule (``CLAUDE.md``, Gmail specifics): demo writes to
 itself only, its own address read from ``users.getProfile`` at runtime (``own_address``),
 never written down; ``self_addressed`` refuses, before any write, a To, Cc or Bcc other
 than that address or a Subject without ``MARK``, ``xippios-live``. Each sequence sweeps

@@ -8,8 +8,8 @@ fixes, ``messageId`` the message's id and ``id`` the attachment's, a part's
 ``body.attachmentId``. The answer is ``schemas.MessagePartBody``, the content in
 ``data``, base64url. 20 quota units (``docs/upstream/pages/quota.md``).
 
-A wrapper without a task in 0.1.0: attachment content is served over no tool (the
-briefing's scope); a decoded message lists its attachments' metadata only.
+A wrapper without a task in 0.1.0: no tool serves attachment content (sdk-core ADR-0025, the
+decoded view); a decoded message lists its attachments' metadata only.
 """
 
 from urllib.parse import quote
